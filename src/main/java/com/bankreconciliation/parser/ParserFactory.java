@@ -1,0 +1,23 @@
+package com.bankreconciliation.parser;
+
+import java.io.File;
+
+/**
+ * Routes file to the appropriate parser based on extension.
+ */
+public class ParserFactory {
+
+    public static FileParser getParser(File file) {
+        String name = file.getName().toLowerCase();
+        if (name.endsWith(".xlsx") || name.endsWith(".xls")) {
+            return new XlsParser();
+        } else if (name.endsWith(".csv")) {
+            return new CsvParser();
+        } else if (name.endsWith(".pdf")) {
+            return new PdfParser();
+        } else if (name.endsWith(".txt")) {
+            return new TxtParser();
+        }
+        throw new IllegalArgumentException("Formato de archivo no soportado: " + name);
+    }
+}

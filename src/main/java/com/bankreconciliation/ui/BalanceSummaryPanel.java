@@ -16,6 +16,7 @@ public class BalanceSummaryPanel extends JPanel {
 
     private final List<Transaction> bookTransactions;
     private final List<Transaction> bankTransactions;
+    private final double saldoInicial;
 
     private JLabel bankBalanceValue;
     private JLabel transitDepositsValue;
@@ -24,9 +25,11 @@ public class BalanceSummaryPanel extends JPanel {
     private JLabel reconciledBalanceValue;
     private JLabel reconciledCountValue;
 
-    public BalanceSummaryPanel(List<Transaction> bookTransactions, List<Transaction> bankTransactions) {
+    public BalanceSummaryPanel(List<Transaction> bookTransactions, List<Transaction> bankTransactions,
+            double saldoInicial) {
         this.bookTransactions = bookTransactions;
         this.bankTransactions = bankTransactions;
+        this.saldoInicial = saldoInicial;
 
         setOpaque(false);
         setLayout(new MigLayout("insets 0, gap 16, fillx", "[grow][grow][grow][grow][grow][grow]", ""));
@@ -86,7 +89,7 @@ public class BalanceSummaryPanel extends JPanel {
     }
 
     public void recalculate() {
-        double bankBalance = 0;
+        double bankBalance = saldoInicial;
         for (Transaction t : bankTransactions) {
             bankBalance += t.getDeposit() - t.getWithdrawal();
         }

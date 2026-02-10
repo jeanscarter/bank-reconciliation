@@ -31,11 +31,14 @@ public class ReconciliationPanel extends JPanel {
         setOpaque(false);
         setLayout(new MigLayout("insets 0, gap 16, fillx, filly", "[grow, 50%][grow, 50%]", "[grow]"));
 
-        add(createTablePanel("📘  Libro Contable", bookTransactions, Transaction.Source.BOOK), "grow");
-        add(createTablePanel("🏦  Estado de Cuenta Bancario", bankTransactions, Transaction.Source.BANK), "grow");
+        add(createTablePanel("📘  Libro Contable", bookTransactions, Transaction.Source.BOOK,
+                new String[] { "Fecha", "Ref", "Descripción", "Debe", "Haber", "Estado" }), "grow");
+        add(createTablePanel("🏦  Estado de Cuenta Bancario", bankTransactions, Transaction.Source.BANK,
+                new String[] { "Fecha", "Ref", "Descripción", "Depósito", "Retiro", "Estado" }), "grow");
     }
 
-    private JPanel createTablePanel(String title, List<Transaction> transactions, Transaction.Source source) {
+    private JPanel createTablePanel(String title, List<Transaction> transactions, Transaction.Source source,
+            String[] columnNames) {
         RoundedPanel panel = new RoundedPanel(20);
         panel.setBackground(new Color(40, 44, 52));
         panel.setLayout(new MigLayout("insets 20, fill, wrap", "[grow]", "[][grow]"));
@@ -58,7 +61,7 @@ public class ReconciliationPanel extends JPanel {
         panel.add(headerRow, "growx");
 
         // Table
-        TransactionTableModel model = new TransactionTableModel(transactions);
+        TransactionTableModel model = new TransactionTableModel(transactions, columnNames);
         if (source == Transaction.Source.BOOK)
             bookModel = model;
         else
@@ -151,11 +154,12 @@ public class ReconciliationPanel extends JPanel {
 
     public static class TransactionTableModel extends AbstractTableModel {
 
-        private static final String[] COLUMNS = { "Fecha", "Ref", "Descripción", "Depósito", "Retiro", "Estado" };
+        private final String[] columns;
         private final List<Transaction> data;
 
-        public TransactionTableModel(List<Transaction> data) {
+        public TransactionTableModel(List<Transaction> data, String[] columns) {
             this.data = data;
+            this.columns = columns;
         }
 
         @Override
@@ -165,12 +169,12 @@ public class ReconciliationPanel extends JPanel {
 
         @Override
         public int getColumnCount() {
-            return COLUMNS.length;
+            return columns.length;
         }
 
         @Override
         public String getColumnName(int col) {
-            return COLUMNS[col];
+            return columns[col];
         }
 
         @Override
