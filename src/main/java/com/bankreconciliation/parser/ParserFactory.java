@@ -18,6 +18,10 @@ public class ParserFactory {
             }
             return new CsvParser();
         } else if (name.endsWith(".pdf")) {
+            // Auto-detect BBVA Provincial bank statement PDF
+            if (ProvincialBankStatementProcessor.isProvincialBankStatement(file)) {
+                return new ProvincialBankStatementProcessor();
+            }
             return new PdfParser();
         } else if (name.endsWith(".txt")) {
             return new TxtParser();
