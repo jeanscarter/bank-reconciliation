@@ -12,6 +12,10 @@ public class ParserFactory {
         if (name.endsWith(".xlsx") || name.endsWith(".xls")) {
             return new XlsParser();
         } else if (name.endsWith(".csv")) {
+            // Auto-detect Banco Provincial Libro Contable format
+            if (ProvincialLibroProcessor.isProvincialFormat(file)) {
+                return new ProvincialLibroProcessor();
+            }
             return new CsvParser();
         } else if (name.endsWith(".pdf")) {
             return new PdfParser();
