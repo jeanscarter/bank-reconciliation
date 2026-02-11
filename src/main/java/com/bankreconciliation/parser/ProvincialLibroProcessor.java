@@ -2,6 +2,8 @@ package com.bankreconciliation.parser;
 
 import com.bankreconciliation.model.Transaction;
 
+import org.apache.poi.ss.usermodel.*;
+
 import javax.swing.*;
 import java.io.*;
 import java.math.BigDecimal;
@@ -12,9 +14,9 @@ import java.util.List;
 import java.util.regex.Pattern;
 
 /**
- * Procesador para "Libro Contable" del Banco Provincial (CSV/Excel).
+ * Procesador para "Libro Contable" del Banco Provincial.
  * <p>
- * <b>Estructura Jerárquica del Archivo:</b>
+ * Soporta tanto archivos CSV como XLS/XLSX con estructura jerárquica:
  * <ul>
  * <li><b>Fila de Fecha (Control):</b> Primera columna contiene un "Excel Serial
  * Date"
@@ -63,21 +65,30 @@ public class ProvincialLibroProcessor implements FileParser {
     // Interfaz FileParser
     // ═══════════════════════════════════════════════════════════════════════════════
 
+    /**
+     * Punto de entrada principal. Detecta el tipo de archivo (CSV vs XLS) y
+     * delega la lectura al método apropiado, luego procesa todas las filas
+     * con la misma lógica jerárquica.
+     */
     @Override
     public List<Transaction> parse(File file, Transaction.Source source) throws Exception {
-        System.out.println("Iniciando procesamiento de archivo: " + file.getName());
+        System.out.println("Iniciando procesamiento de archivo Provincial: " + file.getName());
 
-        List<String> lines;
+        List<String[]> rows;
         try {
-            lines = readAllLines(file);
-        } catch (IOException ioEx) {
+            if (isExcelFile(file)) {
+                rows = readRowsFromExcel(file);
+            } else {
+                rows = readRowsFromCsv(file);
+            }
+        } catch (Exception ioEx) {
             // ── Error de I/O al leer el archivo: diálogo modal inmediato ──
             showCriticalError(0, file.getAbsolutePath(), ioEx,
                     "No se pudo leer el archivo. Verifique que existe, no está bloqueado y tiene permisos de lectura.");
             throw ioEx;
         }
 
-        return processLines(lines, source);
+        return processRows(rows, source);
     }
 
     @Override
@@ -92,8 +103,49 @@ public class ProvincialLibroProcessor implements FileParser {
     /**
      * Heurística para detectar si un archivo es del formato Provincial (Libro
      * Contable).
+     * Soporta tanto CSV como XLS/XLSX.
      */
     public static boolean isProvincialFormat(File file) {
+        String name = file.getName().toLowerCase();
+
+        if (name.endsWith(".xls") || name.endsWith(".xlsx")) {
+            return isProvincialExcelFormat(file);
+        }
+        return isProvincialCsvFormat(file);
+    }
+
+    /**
+     * Detecta formato Provincial en archivos XLS/XLSX usando Apache POI.
+     * Busca en la primera fila: col 0 = "Número" y col 4 = "Nro. Doc."
+     */
+    private static boolean isProvincialExcelFormat(File file) {
+        try (FileInputStream fis = new FileInputStream(file);
+                Workbook workbook = WorkbookFactory.create(fis)) {
+
+            Sheet sheet = workbook.getSheetAt(0);
+            // Revisar las primeras 5 filas buscando la cabecera provincial
+            for (int i = 0; i <= Math.min(5, sheet.getLastRowNum()); i++) {
+                Row row = sheet.getRow(i);
+                if (row == null)
+                    continue;
+
+                String col0 = getCellAsString(row.getCell(0));
+                String col4 = getCellAsString(row.getCell(4));
+
+                if (col0.contains("Número") && col4.contains("Nro. Doc")) {
+                    return true;
+                }
+            }
+        } catch (Exception e) {
+            // Si no se puede abrir, no es formato Provincial
+        }
+        return false;
+    }
+
+    /**
+     * Detecta formato Provincial en archivos CSV (lógica original).
+     */
+    private static boolean isProvincialCsvFormat(File file) {
         try (BufferedReader br = new BufferedReader(
                 new InputStreamReader(new FileInputStream(file), StandardCharsets.ISO_8859_1))) {
             String line;
@@ -111,36 +163,89 @@ public class ProvincialLibroProcessor implements FileParser {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════
+    // Lectores de Archivo (CSV y XLS)
+    // ═══════════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Lee un archivo XLS/XLSX y convierte cada fila a String[], unificando
+     * la representación con el lector CSV.
+     */
+    private List<String[]> readRowsFromExcel(File file) throws Exception {
+        List<String[]> result = new ArrayList<>();
+
+        try (FileInputStream fis = new FileInputStream(file);
+                Workbook workbook = WorkbookFactory.create(fis)) {
+
+            Sheet sheet = workbook.getSheetAt(0);
+            for (int r = 0; r <= sheet.getLastRowNum(); r++) {
+                Row row = sheet.getRow(r);
+                if (row == null) {
+                    result.add(new String[0]);
+                    continue;
+                }
+
+                int lastCol = row.getLastCellNum();
+                if (lastCol < 0)
+                    lastCol = 0;
+                String[] cells = new String[lastCol];
+                for (int c = 0; c < lastCol; c++) {
+                    cells[c] = getCellAsString(row.getCell(c));
+                }
+                result.add(cells);
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Lee un archivo CSV y convierte cada línea a String[] usando el parser CSV.
+     */
+    private List<String[]> readRowsFromCsv(File file) throws IOException {
+        List<String> lines = readAllLines(file);
+        List<String[]> result = new ArrayList<>();
+        for (String line : lines) {
+            if (line.trim().isEmpty()) {
+                result.add(new String[0]);
+            } else {
+                result.add(splitCSV(line));
+            }
+        }
+        return result;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════
     // Motor Principal de Procesamiento
     // ═══════════════════════════════════════════════════════════════════════════════
 
     /**
-     * Procesa todas las líneas del archivo con la lógica jerárquica:
+     * Procesa todas las filas del archivo con la lógica jerárquica:
      * <ol>
      * <li>Detecta filas de fecha y actualiza {@code currentDate}.</li>
      * <li>Filtra filas de ruido (cabeceras, sub-totales, vacías, *ANULADO*).</li>
      * <li>Extrae datos de transacción usando {@code currentDate} como fecha.</li>
      * </ol>
-     * Cada línea se procesa dentro de un try-catch granular. Si ocurre un error,
+     * Cada fila se procesa dentro de un try-catch granular. Si ocurre un error,
      * se muestra un {@link JOptionPane} modal y el usuario decide si continuar.
      */
-    private List<Transaction> processLines(List<String> lines, Transaction.Source source) throws Exception {
+    private List<Transaction> processRows(List<String[]> rows, Transaction.Source source) throws Exception {
         List<Transaction> transactions = new ArrayList<>();
         // ── FECHA JERÁRQUICA: inicia en null, se actualiza al encontrar fila de fecha
         // ──
         LocalDate currentDate = null;
         int lineNumber = 0;
 
-        for (String rawLine : lines) {
+        for (String[] cells : rows) {
             lineNumber++;
-            String line = rawLine.trim();
-            if (line.isEmpty())
+
+            // Fila vacía: ignorar
+            if (cells.length == 0)
                 continue;
+
+            // Reconstruir representación textual de la fila para mensajes de error
+            String rawLine = String.join(" | ", cells);
 
             // ── TRY-CATCH GRANULAR POR LÍNEA ──────────────────────────────
             try {
-                String[] cells = splitCSV(line);
-
                 // ─────────────────────────────────────────────────────────────
                 // 1. DETECCIÓN DE FECHA JERÁRQUICA (Fila de Control)
                 // Si col 0 es un Excel Serial Date (ej. 45992.0), se convierte
@@ -156,9 +261,10 @@ public class ProvincialLibroProcessor implements FileParser {
                 // 2. FILTROS DE RUIDO
                 // Se ignoran: cabeceras, sub-totales, y filas con pocas columnas.
                 // ─────────────────────────────────────────────────────────────
-                if (cells.length > 0 && cells[0].startsWith("Número"))
+                String col0 = cleanField(cells[0]);
+                if (col0.startsWith("Número") || col0.startsWith("Numero"))
                     continue;
-                if (rawLine.contains("Sub-Totales"))
+                if (rawLine.contains("Sub-Totales") || rawLine.contains("Sub-Total"))
                     continue;
                 if (cells.length <= COL_HABER)
                     continue;
@@ -168,7 +274,6 @@ public class ProvincialLibroProcessor implements FileParser {
                 // Col 0 debe ser un número de secuencia (regex ^\d+$)
                 // y currentDate no debe ser null.
                 // ─────────────────────────────────────────────────────────────
-                String col0 = cleanField(cells[COL_SERIAL_DATE]);
                 if (!TRANSACTION_SEQ_PATTERN.matcher(col0).matches())
                     continue;
 
@@ -229,11 +334,9 @@ public class ProvincialLibroProcessor implements FileParser {
                         "Verifique el formato de la celda en la línea indicada.");
 
                 if (!continuar) {
-                    // El usuario eligió abortar; devolver lo que se procesó hasta ahora
                     System.err.println("Procesamiento abortado por el usuario en línea " + lineNumber);
                     return transactions;
                 }
-                // Si el usuario eligió continuar, la línea se omite y seguimos
             }
         }
 
@@ -283,44 +386,38 @@ public class ProvincialLibroProcessor implements FileParser {
      * <li>Elimina comas de miles (ej. "1,234.56" → "1234.56").</li>
      * <li>Si el campo está vacío o nulo, retorna 0.0.</li>
      * </ul>
-     *
-     * @param raw el valor crudo de la celda CSV
-     * @return el monto como double, o 0.0 si está vacío
-     * @throws NumberFormatException si el valor no puede parsearse como número
      */
     private double parseAmountSafe(String raw) throws NumberFormatException {
         if (raw == null)
             return 0.0;
 
-        // Eliminar comillas y espacios
         String clean = raw.replaceAll("\"", "").trim();
-        // Eliminar comas (separadores de miles, ej. "1,234.56")
         clean = clean.replace(",", "");
 
         if (clean.isEmpty())
             return 0.0;
 
-        // Usar BigDecimal para parsing preciso, luego convertir a double
         return new BigDecimal(clean).doubleValue();
     }
 
-    /**
-     * Limpia un campo CSV: elimina comillas externas y espacios.
-     */
+    /** Limpia un campo: elimina comillas externas y espacios. */
     private String cleanField(String raw) {
         if (raw == null)
             return "";
         return raw.trim().replaceAll("^\"|\"$", "").trim();
     }
 
+    /** Verifica si el archivo es un Excel (XLS o XLSX). */
+    private static boolean isExcelFile(File file) {
+        String name = file.getName().toLowerCase();
+        return name.endsWith(".xls") || name.endsWith(".xlsx");
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════════
-    // CSV Parser y Lectura de Archivo
+    // Utilidades: CSV Parser, lectura de archivo, conversión de celda POI
     // ═══════════════════════════════════════════════════════════════════════════════
 
-    /**
-     * Parser CSV que respeta comillas pero NO las incluye en el resultado.
-     * Maneja campos entrecomillados que contienen comas internas.
-     */
+    /** Parser CSV que respeta comillas pero NO las incluye en el resultado. */
     private String[] splitCSV(String line) {
         List<String> result = new ArrayList<>();
         StringBuilder current = new StringBuilder();
@@ -340,7 +437,7 @@ public class ProvincialLibroProcessor implements FileParser {
     }
 
     /**
-     * Lee todas las líneas del archivo, intentando primero UTF-8 y cayendo a
+     * Lee todas las líneas del archivo CSV, intentando UTF-8 y cayendo a
      * ISO-8859-1.
      */
     private List<String> readAllLines(File file) throws IOException {
@@ -351,34 +448,58 @@ public class ProvincialLibroProcessor implements FileParser {
         }
     }
 
+    /**
+     * Convierte una celda POI a String preservando valores numéricos crudos.
+     * <p>
+     * IMPORTANTE: NO se usa {@code DateUtil.isCellDateFormatted()} porque las
+     * celdas de fecha serial (ej. 45992.0) son las "Filas de Control" jerárquicas
+     * que debemos detectar como números, no como fechas formateadas de Java.
+     */
+    private static String getCellAsString(Cell cell) {
+        if (cell == null)
+            return "";
+        return switch (cell.getCellType()) {
+            case STRING -> cell.getStringCellValue().trim();
+            case NUMERIC -> {
+                // Siempre devolver el valor numérico crudo para que el detector
+                // de fecha serial (isSerialDateRow) reconozca "45992", etc.
+                double val = cell.getNumericCellValue();
+                if (val == Math.floor(val) && !Double.isInfinite(val)) {
+                    yield String.valueOf((long) val);
+                }
+                yield String.valueOf(val);
+            }
+            case BOOLEAN -> String.valueOf(cell.getBooleanCellValue());
+            case FORMULA -> {
+                try {
+                    yield String.valueOf(cell.getNumericCellValue());
+                } catch (Exception e) {
+                    try {
+                        yield cell.getStringCellValue();
+                    } catch (Exception e2) {
+                        yield "";
+                    }
+                }
+            }
+            default -> "";
+        };
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════════
     // Diálogo de Error Crítico (JOptionPane)
     // ═══════════════════════════════════════════════════════════════════════════════
 
     /**
-     * Muestra una ventana modal de error crítico con detalles completos del fallo.
-     * <p>
-     * El diálogo incluye:
-     * <ul>
-     * <li>Número de línea exacto donde ocurrió el error.</li>
-     * <li>Contenido crudo de la línea que falló.</li>
-     * <li>Tipo de excepción y mensaje técnico.</li>
-     * <li>Instrucción al usuario para verificar el archivo.</li>
-     * </ul>
-     * El usuario puede elegir "Sí" para continuar procesando o "No" para abortar.
+     * Muestra una ventana modal de error para que el usuario reconozca el problema.
+     * Incluye: número de línea, contenido crudo, tipo de excepción, y una
+     * instrucción.
+     * El usuario elige "Sí" para continuar o "No" para abortar.
      *
-     * @param lineNumber     número de línea donde ocurrió el error (0 si es error
-     *                       de I/O global)
-     * @param rawLineContent contenido crudo de la línea (o ruta del archivo si es
-     *                       error de I/O)
-     * @param exception      la excepción capturada
-     * @param userHint       instrucción adicional para el usuario
      * @return {@code true} si el usuario desea continuar, {@code false} para
      *         abortar
      */
     private boolean showCriticalError(int lineNumber, String rawLineContent,
             Exception exception, String userHint) {
-        // También imprimir en consola para logs
         System.err.println("ERROR CRÍTICO en línea " + lineNumber + ": " + exception.getMessage());
         exception.printStackTrace();
 

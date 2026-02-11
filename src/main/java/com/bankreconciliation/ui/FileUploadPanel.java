@@ -391,12 +391,32 @@ public class FileUploadPanel extends JPanel {
             @Override
             protected void done() {
                 if (errorMsg != null) {
-                    Toast.show("Error: " + errorMsg, Toast.Type.ERROR);
+                    // ── DIÁLOGO MODAL DE ERROR ──
+                    // Reemplaza el Toast para que el usuario DEBA hacer clic en Aceptar
+                    JOptionPane.showMessageDialog(
+                            FileUploadPanel.this,
+                            "Error al procesar el archivo:\n\n"
+                                    + file.getName() + "\n\n"
+                                    + "Detalle del error:\n" + errorMsg + "\n\n"
+                                    + "Verifique el formato del archivo e intente nuevamente.",
+                            "Error en Procesamiento de Archivo",
+                            JOptionPane.ERROR_MESSAGE);
                     return;
                 }
 
                 if (parsed.isEmpty()) {
-                    Toast.show("No se encontraron transacciones en el archivo", Toast.Type.WARNING);
+                    // ── DIÁLOGO MODAL DE ADVERTENCIA ──
+                    JOptionPane.showMessageDialog(
+                            FileUploadPanel.this,
+                            "No se encontraron transacciones en el archivo:\n\n"
+                                    + file.getName() + "\n\n"
+                                    + "Posibles causas:\n"
+                                    + "• El archivo está vacío o no contiene datos válidos.\n"
+                                    + "• El formato del archivo no es compatible.\n"
+                                    + "• Las filas de transacción no cumplen con el patrón esperado.\n\n"
+                                    + "Verifique el contenido del archivo.",
+                            "Sin Transacciones",
+                            JOptionPane.WARNING_MESSAGE);
                     return;
                 }
 

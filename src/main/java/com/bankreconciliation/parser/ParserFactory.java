@@ -10,6 +10,10 @@ public class ParserFactory {
     public static FileParser getParser(File file) {
         String name = file.getName().toLowerCase();
         if (name.endsWith(".xlsx") || name.endsWith(".xls")) {
+            // Auto-detect Banco Provincial Libro Contable format (hierarchical)
+            if (ProvincialLibroProcessor.isProvincialFormat(file)) {
+                return new ProvincialLibroProcessor();
+            }
             return new XlsParser();
         } else if (name.endsWith(".csv")) {
             // Auto-detect Banco Provincial Libro Contable format

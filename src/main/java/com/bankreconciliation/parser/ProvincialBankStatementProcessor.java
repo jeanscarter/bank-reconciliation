@@ -5,6 +5,7 @@ import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
 
+import javax.swing.*;
 import java.io.File;
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -16,73 +17,86 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Specialized parser for BBVA Provincial bank statement PDFs
- * ("ESTADO DE CUENTA CORRIENTE").
- *
- * <h3>Key behaviors:</h3>
+ * Procesador de Estados de Cuenta (PDF) del Banco Provincial (BBVA).
+ * <p>
+ * <b>Estructura del PDF:</b>
  * <ul>
- * <li>Detects the document by header text: "BBVA Provincial",
- * "ESTADO DE CUENTA".</li>
- * <li>Extracts <b>Saldo Anterior</b> from the first transaction line whose
- * CONCEPTO contains "SALDO ANTERIOR".</li>
- * <li>Maps columns: F. OPER. → date, REF. → reference, CONCEPTO → description,
- * CARGOS → withdrawal, ABONOS → deposit.</li>
- * <li>Handles <b>multi-line descriptions</b> by looking ahead for continuation
- * lines that do not start with a date.</li>
- * <li>Handles OCR artifacts: dash ({@code -}) used as decimal separator
- * (e.g. {@code 3,087,990-20} → {@code 3087990.20}).</li>
- * <li>Ignores repeated column headers, page footers, and the SALDO column.</li>
- * <li>Uses {@link BigDecimal} internally for monetary precision.</li>
+ * <li>Cabecera del banco y datos del titular (primeras líneas)</li>
+ * <li>Línea "SALDO ANTERIOR" con el balance inicial</li>
+ * <li>Transacciones:
+ * {@code DD-MM-YYYY REF CONCEPTO DD-MM-YYYY MONTO SALDO}</li>
+ * <li>Ruido inter-página: {@code BGPRX1}, fecha de impresión, cabeceras
+ * repetidas</li>
  * </ul>
+ * <p>
+ * <b>Método Delta SALDO:</b> Cada línea tiene exactamente 2 montos: el valor de
+ * la
+ * transacción y el SALDO acumulado. No hay columnas separadas para CARGOS y
+ * ABONOS.
+ * Se compara el SALDO actual con el anterior para determinar si es depósito o
+ * retiro:
+ * <ul>
+ * <li>SALDO actual &gt; SALDO anterior → <b>ABONO</b> (depósito)</li>
+ * <li>SALDO actual &lt; SALDO anterior → <b>CARGO</b> (retiro)</li>
+ * </ul>
+ * <p>
+ * <b>Manejo de Errores:</b> Errores de parsing disparan {@link JOptionPane}
+ * modal
+ * con detalle de la línea y opción de Continuar/Abortar.
  */
 public class ProvincialBankStatementProcessor implements FileParser {
 
-    // ── Date format: DD-MM-YYYY ──────────────────────────────────────────────
+    // ─── Formatos y Patrones ─────────────────────────────────────────────────
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("dd-MM-yyyy");
 
-    // ── Line-level patterns ──────────────────────────────────────────────────
-
     /**
-     * Matches a transaction line that starts with a date DD-MM-YYYY.
-     * Captures: (1) date, (2) remainder of line.
+     * Línea de transacción: comienza con DD-MM-YYYY, captura (1) fecha y (2) resto.
      */
     private static final Pattern TXN_LINE = Pattern.compile(
             "^(\\d{2}-\\d{2}-\\d{4})\\s+(.+)$");
 
     /**
-     * Matches a monetary amount, including OCR artifacts:
-     * <ul>
-     * <li>{@code 3,087,990.20} — normal</li>
-     * <li>{@code 3,087,990-20} — dash as decimal (OCR)</li>
-     * <li>{@code 12,365.00} or {@code 37.09}</li>
-     * </ul>
-     * Captures the full amount string for further cleaning.
+     * Monto monetario: soporta formatos como 3,087,990.20 12,365.00 37.09 0.67
+     * También soporta OCR artifact con guion: 3,087,990-20
      */
     private static final Pattern AMOUNT_PATTERN = Pattern.compile(
             "(\\d{1,3}(?:,\\d{3})*(?:[.\\-]\\d{2}))");
 
-    /** Footer / noise patterns to discard. */
+    /** Patrón para ruido: pie de página, número de página, fecha impresión. */
     private static final Pattern FOOTER_PATTERN = Pattern.compile(
-            "^\\d{2}/\\d{2}/\\d{4}\\s+\\d{2}[.]\\d{2}|^Pág(?:ina)?[.:]?\\s*\\d+"
-                    + "|^Página\\s+\\d+|^\\s*\\d+\\s*$",
+            "^\\d{2}/\\d{2}/\\d{4}\\s+\\d{2}[.]\\d{2}"
+                    + "|^Pág(?:ina)?[.:]?\\s*\\d+"
+                    + "|^Página\\s+\\d+"
+                    + "|^\\s*\\d+\\s*$",
             Pattern.CASE_INSENSITIVE);
 
-    /** Column header row — repeats on each page. */
+    /** Cabecera de columnas repetida en cada página. */
     private static final Pattern HEADER_ROW = Pattern.compile(
             "F\\.?\\s*OPER|REF\\.?|CONCEPTO|F\\.?\\s*VALOR|CARGOS|ABONOS|SALDO",
             Pattern.CASE_INSENSITIVE);
 
-    /** Bank identification keywords. */
-    private static final String[] BANK_KEYWORDS = {
-            "BBVA Provincial",
-            "ESTADO DE CUENTA"
-    };
+    /** Identificador de sistema que aparece como separador de páginas. */
+    private static final Pattern SYSTEM_CODE = Pattern.compile("^[A-Z]{2,6}[A-Z0-9]{0,4}$");
 
-    // ── FileParser interface ─────────────────────────────────────────────────
+    private static final String ERROR_DIALOG_TITLE = "Error en Procesamiento del Estado de Cuenta";
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Interfaz FileParser
+    // ═══════════════════════════════════════════════════════════════════════════
 
     @Override
     public List<Transaction> parse(File file, Transaction.Source source) throws Exception {
-        String fullText = extractText(file);
+        System.out.println("Iniciando procesamiento de Estado de Cuenta Provincial: " + file.getName());
+
+        String fullText;
+        try {
+            fullText = extractText(file);
+        } catch (Exception ex) {
+            showCriticalError(0, file.getAbsolutePath(), ex,
+                    "No se pudo leer el archivo PDF. Verifique que no esté corrupto o protegido.");
+            throw ex;
+        }
+
         String[] allLines = fullText.split("\\r?\\n");
         return processLines(allLines, source);
     }
@@ -93,23 +107,19 @@ public class ProvincialBankStatementProcessor implements FileParser {
             String text = extractText(file);
             String[] lines = text.split("\\r?\\n");
 
-            // Strategy 1: Look for "SALDO ANTERIOR" in description
             for (String line : lines) {
                 if (line.toUpperCase().contains("SALDO ANTERIOR")) {
-                    // Extract amounts from this line
-                    List<BigDecimal> amounts = extractAmounts(line);
+                    List<BigDecimal> amounts = extractAmountsFromText(line);
                     if (!amounts.isEmpty()) {
-                        // The saldo anterior amount is typically the first or the ABONOS column
                         return amounts.get(amounts.size() - 1).doubleValue();
                     }
                 }
             }
 
-            // Strategy 2: Look for "Saldo Inicial" or "Saldo al" patterns
             for (String line : lines) {
                 String upper = line.toUpperCase().trim();
                 if (upper.contains("SALDO INICIAL") || upper.contains("SALDO AL")) {
-                    List<BigDecimal> amounts = extractAmounts(line);
+                    List<BigDecimal> amounts = extractAmountsFromText(line);
                     if (!amounts.isEmpty()) {
                         return amounts.get(amounts.size() - 1).doubleValue();
                     }
@@ -120,11 +130,16 @@ public class ProvincialBankStatementProcessor implements FileParser {
         return 0.0;
     }
 
-    // ── Static detection helper ──────────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Detección de formato
+    // ═══════════════════════════════════════════════════════════════════════════
 
     /**
-     * Checks whether a PDF file is a BBVA Provincial bank statement.
-     * Inspects the first page for identifying keywords.
+     * Verifica si un archivo PDF es un Estado de Cuenta del Banco Provincial.
+     * Busca la combinación de "Provincial" (en cualquier contexto: BBVA, Linea,
+     * etc.)
+     * junto con "ESTADO DE CUENTA" en la primera página.
+     * También acepta el código de banco 0108- como identificador secundario.
      */
     public static boolean isProvincialBankStatement(File file) {
         try (PDDocument doc = Loader.loadPDF(file)) {
@@ -132,59 +147,99 @@ public class ProvincialBankStatementProcessor implements FileParser {
             stripper.setStartPage(1);
             stripper.setEndPage(1);
             String firstPage = stripper.getText(doc);
+            String upper = firstPage.toUpperCase();
 
-            boolean hasBankName = false;
-            boolean hasStatementType = false;
+            boolean hasProvincial = upper.contains("PROVINCIAL");
+            boolean hasEstadoCuenta = upper.contains("ESTADO DE CUENTA");
+            // Código de banco Provincial: 0108
+            boolean hasBankCode = firstPage.contains("0108-");
 
-            for (String keyword : BANK_KEYWORDS) {
-                if (firstPage.contains(keyword)) {
-                    if (keyword.contains("Provincial"))
-                        hasBankName = true;
-                    if (keyword.contains("ESTADO"))
-                        hasStatementType = true;
-                }
-            }
-
-            return hasBankName && hasStatementType;
+            return hasEstadoCuenta && (hasProvincial || hasBankCode);
         } catch (Exception e) {
             return false;
         }
     }
 
-    // ── Core processing logic ────────────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Motor de Procesamiento — Método Delta SALDO (2 pasadas)
+    // ═══════════════════════════════════════════════════════════════════════════
 
-    private List<Transaction> processLines(String[] lines, Transaction.Source source) {
-        List<Transaction> transactions = new ArrayList<>();
+    /**
+     * Registro intermedio para la primera pasada: guarda los datos crudos
+     * de cada transacción SIN clasificar CARGO/ABONO aún.
+     */
+    private record RawTransaction(
+            LocalDate date,
+            String reference,
+            String description,
+            BigDecimal transactionAmount,
+            BigDecimal saldo,
+            int lineNumber,
+            String rawLine) {
+    }
+
+    /**
+     * Proceso principal en 2 pasadas:
+     * <ol>
+     * <li><b>Pasada 1:</b> Extrae todas las transacciones con su SALDO y monto
+     * bruto</li>
+     * <li><b>Pasada 2:</b> Compara SALDOs consecutivos para clasificar CARGO vs
+     * ABONO</li>
+     * </ol>
+     */
+    private List<Transaction> processLines(String[] lines, Transaction.Source source) throws Exception {
+        // ═════════════════════════════════════════════════════════════════════
+        // PASADA 1: Extraer transacciones crudas + SALDO ANTERIOR
+        // ═════════════════════════════════════════════════════════════════════
+        List<RawTransaction> rawTransactions = new ArrayList<>();
+        BigDecimal saldoAnterior = null;
 
         int i = 0;
         while (i < lines.length) {
             String line = lines[i].trim();
 
-            // Skip empty lines
+            // Saltar líneas vacías
             if (line.isEmpty()) {
                 i++;
                 continue;
             }
 
-            // Skip header rows (column names repeated per page)
+            // Saltar cabeceras de columnas (repetidas en cada página)
             if (isHeaderRow(line)) {
                 i++;
                 continue;
             }
 
-            // Skip footer / page number / report date lines
+            // Saltar pie de página / ruido
             if (isFooterOrNoise(line)) {
                 i++;
                 continue;
             }
 
-            // Skip bank identification / account holder blocks
+            // Saltar metadatos del banco
             if (isBankMetadata(line)) {
                 i++;
                 continue;
             }
 
-            // Attempt to parse as transaction line (starts with DD-MM-YYYY)
+            // Saltar códigos de sistema (ej. "BGPRX1")
+            if (SYSTEM_CODE.matcher(line).matches()) {
+                i++;
+                continue;
+            }
+
+            // ── SALDO ANTERIOR ──
+            if (line.toUpperCase().contains("SALDO ANTERIOR")) {
+                List<BigDecimal> amounts = extractAmountsFromText(line);
+                if (!amounts.isEmpty()) {
+                    saldoAnterior = amounts.get(amounts.size() - 1);
+                    System.out.println("Saldo Anterior detectado: " + saldoAnterior);
+                }
+                i++;
+                continue;
+            }
+
+            // ── Intentar parsear como línea de transacción (DD-MM-YYYY ...) ──
             Matcher txnMatcher = TXN_LINE.matcher(line);
             if (!txnMatcher.matches()) {
                 i++;
@@ -194,18 +249,7 @@ public class ProvincialBankStatementProcessor implements FileParser {
             String dateStr = txnMatcher.group(1);
             String remainder = txnMatcher.group(2).trim();
 
-            // Parse date
-            LocalDate date;
-            try {
-                date = LocalDate.parse(dateStr, DATE_FMT);
-            } catch (DateTimeParseException e) {
-                i++;
-                continue;
-            }
-
-            // ── Look-ahead: collect multi-line description ──
-            // A continuation line does NOT start with a date and does NOT match
-            // header/footer patterns.
+            // Look-ahead: juntar líneas de continuación (descripción multilínea)
             StringBuilder fullLine = new StringBuilder(remainder);
             int nextIdx = i + 1;
             while (nextIdx < lines.length) {
@@ -216,139 +260,145 @@ public class ProvincialBankStatementProcessor implements FileParser {
                     break;
                 if (isHeaderRow(nextLine) || isFooterOrNoise(nextLine))
                     break;
-                // This is a continuation line — append to description
+                if (isBankMetadata(nextLine))
+                    break;
+                if (SYSTEM_CODE.matcher(nextLine).matches())
+                    break;
+                if (nextLine.toUpperCase().contains("SALDO ANTERIOR"))
+                    break;
                 fullLine.append(" ").append(nextLine);
                 nextIdx++;
             }
+            i = nextIdx;
 
-            i = nextIdx; // Advance past consumed lines
+            // ── TRY-CATCH GRANULAR ──
+            try {
+                LocalDate date = LocalDate.parse(dateStr, DATE_FMT);
+                String assembledLine = fullLine.toString();
 
-            // ── Parse the full transaction line ──
-            Transaction txn = parseTransactionLine(date, fullLine.toString(), source);
-            if (txn != null) {
-                transactions.add(txn);
+                // Extraer referencia (primer token numérico de 4+ dígitos)
+                String reference = "S/N";
+                Matcher refMatcher = Pattern.compile("^(\\d{4,})\\s+").matcher(assembledLine);
+                if (refMatcher.find()) {
+                    reference = refMatcher.group(1);
+                }
+
+                // Extraer todos los montos de la línea
+                List<AmountMatch> amountMatches = findAllAmounts(assembledLine);
+
+                if (amountMatches.size() < 2) {
+                    // Necesitamos al menos 2 montos: transacción + saldo
+                    // Con 1 solo monto no podemos determinar nada confiablemente
+                    continue;
+                }
+
+                // Los últimos 2 montos son: transacción y SALDO
+                BigDecimal txnAmount = amountMatches.get(amountMatches.size() - 2).value;
+                BigDecimal saldo = amountMatches.get(amountMatches.size() - 1).value;
+
+                // Descripción: texto entre la referencia y el primer monto
+                int refEnd = refMatcher.find(0) ? refMatcher.end() : 0;
+                int firstAmtStart = amountMatches.get(0).start;
+                String description = "";
+                if (firstAmtStart > refEnd) {
+                    description = assembledLine.substring(refEnd, firstAmtStart).trim();
+                }
+                description = cleanDescription(description);
+
+                // Saltar "SALDO ANTERIOR" como transacción
+                if (description.toUpperCase().contains("SALDO ANTERIOR")) {
+                    if (saldoAnterior == null) {
+                        saldoAnterior = saldo;
+                    }
+                    continue;
+                }
+
+                rawTransactions.add(new RawTransaction(
+                        date, reference, description, txnAmount, saldo,
+                        i, line));
+
+            } catch (DateTimeParseException dtpe) {
+                boolean continuar = showCriticalError(i, line, dtpe,
+                        "La fecha '" + dateStr + "' no tiene formato DD-MM-YYYY válido.");
+                if (!continuar)
+                    return new ArrayList<>();
+            } catch (Exception ex) {
+                boolean continuar = showCriticalError(i, line, ex,
+                        "Error inesperado al procesar esta línea de transacción.");
+                if (!continuar)
+                    return new ArrayList<>();
             }
         }
 
+        // ═════════════════════════════════════════════════════════════════════
+        // PASADA 2: Clasificar CARGO vs ABONO usando Delta SALDO
+        // ═════════════════════════════════════════════════════════════════════
+        List<Transaction> transactions = new ArrayList<>();
+        BigDecimal previousSaldo = saldoAnterior;
+
+        for (RawTransaction raw : rawTransactions) {
+            try {
+                double deposit = 0.0;
+                double withdrawal = 0.0;
+
+                if (previousSaldo != null) {
+                    // Delta = SALDO actual - SALDO anterior
+                    // Positivo = ABONO (depósito), Negativo = CARGO (retiro)
+                    int delta = raw.saldo.compareTo(previousSaldo);
+
+                    if (delta > 0) {
+                        // El saldo subió → ABONO (depósito)
+                        deposit = raw.transactionAmount.doubleValue();
+                    } else if (delta < 0) {
+                        // El saldo bajó → CARGO (retiro)
+                        withdrawal = raw.transactionAmount.doubleValue();
+                    }
+                    // delta == 0: raro, pero posible si monto es 0 → se ignora
+                } else {
+                    // Sin saldo anterior: usar heurística por descripción como fallback
+                    String descUpper = raw.description.toUpperCase();
+                    if (isWithdrawalKeyword(descUpper)) {
+                        withdrawal = raw.transactionAmount.doubleValue();
+                    } else {
+                        deposit = raw.transactionAmount.doubleValue();
+                    }
+                }
+
+                if (deposit == 0.0 && withdrawal == 0.0) {
+                    previousSaldo = raw.saldo;
+                    continue;
+                }
+
+                transactions.add(new Transaction(
+                        raw.date, raw.reference, raw.description,
+                        deposit, withdrawal, source));
+
+                previousSaldo = raw.saldo;
+
+            } catch (Exception ex) {
+                boolean continuar = showCriticalError(raw.lineNumber, raw.rawLine, ex,
+                        "Error al clasificar la transacción como CARGO o ABONO.");
+                if (!continuar)
+                    return transactions;
+                previousSaldo = raw.saldo;
+            }
+        }
+
+        System.out.println("Procesamiento del Estado de Cuenta finalizado. "
+                + "Transacciones: " + transactions.size());
         return transactions;
     }
 
-    /**
-     * Parses a single transaction from the assembled line content (after the date).
-     *
-     * <p>
-     * Expected structure (variable spacing):
-     * {@code REF CONCEPTO [F.VALOR] CARGOS ABONOS [SALDO]}
-     *
-     * <p>
-     * We use amount positions anchored from the right side of the line to
-     * distinguish CARGOS, ABONOS, and SALDO.
-     */
-    private Transaction parseTransactionLine(LocalDate date, String lineContent,
-            Transaction.Source source) {
-        // Extract all amounts from the line
-        List<AmountMatch> amountMatches = findAllAmounts(lineContent);
-
-        if (amountMatches.isEmpty())
-            return null;
-
-        // ── Reference: first token (numeric) ──
-        String reference = "S/N";
-        Pattern refPattern = Pattern.compile("^(\\d{4,})\\s+");
-        Matcher refMatcher = refPattern.matcher(lineContent);
-        if (refMatcher.find()) {
-            reference = refMatcher.group(1);
-        }
-
-        // ── Description: text between reference and first amount ──
-        String description = "";
-        if (!amountMatches.isEmpty()) {
-            int firstAmtStart = amountMatches.get(0).start;
-            // Adjust: firstAmtStart is relative to lineContent, but descriptionZone starts
-            // later
-            int refEnd = refMatcher.find(0) ? refMatcher.end() : 0;
-            if (firstAmtStart > refEnd) {
-                description = lineContent.substring(refEnd, firstAmtStart).trim();
-            }
-        }
-
-        // Clean up description
-        description = cleanDescription(description);
-
-        // Skip "SALDO ANTERIOR" transactions — this is metadata, not a real transaction
-        if (description.toUpperCase().contains("SALDO ANTERIOR")) {
-            return null;
-        }
-
-        // ── Amount assignment logic ──
-        // Provincial PDF has columns: ... CARGOS | ABONOS | SALDO
-        // - If 3+ amounts: last = SALDO (ignored), second-to-last = ABONOS,
-        // third-to-last = CARGOS
-        // - If 2 amounts: could be CARGOS+SALDO or ABONOS+SALDO, or CARGOS+ABONOS
-        // - If 1 amount: need to infer from position
-        //
-        // Heuristic: The last amount is usually SALDO. CARGOS and ABONOS occupy
-        // the two columns before SALDO. Often only one of CARGOS/ABONOS has a value.
-
-        BigDecimal withdrawal = BigDecimal.ZERO; // CARGOS
-        BigDecimal deposit = BigDecimal.ZERO; // ABONOS
-
-        int n = amountMatches.size();
-
-        if (n >= 3) {
-            // amounts[-3] = CARGOS, amounts[-2] = ABONOS, amounts[-1] = SALDO (ignored)
-            // But either CARGOS or ABONOS will be the actual non-zero value
-            BigDecimal val1 = amountMatches.get(n - 3).value;
-            BigDecimal val2 = amountMatches.get(n - 2).value;
-            // F.VALOR date may also produce a match, so check if val1 looks like a date
-            // amount
-            // Provincial statements: typically one of CARGOS/ABONOS is zero or missing
-            withdrawal = val1;
-            deposit = val2;
-        } else if (n == 2) {
-            // Two amounts: one is the transaction, one is SALDO
-            // The amount that appears earlier in the line is the transaction amount
-            BigDecimal val1 = amountMatches.get(0).value;
-
-            // Determine: is it a CARGO or ABONO?
-            // Use position heuristic: CARGOS comes before ABONOS in the line
-            // and both come before SALDO
-            // If only 2 amounts, last is likely SALDO
-            // Need to determine if val1 is CARGO or ABONO based on description keywords
-            String descUpper = description.toUpperCase();
-            if (isWithdrawalKeyword(descUpper)) {
-                withdrawal = val1;
-            } else {
-                deposit = val1;
-            }
-        } else if (n == 1) {
-            // Single amount — use description keywords
-            BigDecimal val = amountMatches.get(0).value;
-            String descUpper = description.toUpperCase();
-            if (isWithdrawalKeyword(descUpper)) {
-                withdrawal = val;
-            } else {
-                deposit = val;
-            }
-        }
-
-        if (withdrawal.compareTo(BigDecimal.ZERO) == 0 && deposit.compareTo(BigDecimal.ZERO) == 0) {
-            return null;
-        }
-
-        return new Transaction(date, reference, description,
-                deposit.doubleValue(), withdrawal.doubleValue(), source);
-    }
-
-    // ── Row classifiers ──────────────────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Clasificadores de Fila
+    // ═══════════════════════════════════════════════════════════════════════════
 
     private boolean isHeaderRow(String line) {
-        // Count how many column header keywords appear
         Matcher m = HEADER_ROW.matcher(line);
         int count = 0;
         while (m.find())
             count++;
-        return count >= 2; // At least 2 column names → header row
+        return count >= 2;
     }
 
     private boolean isFooterOrNoise(String line) {
@@ -357,9 +407,7 @@ public class ProvincialBankStatementProcessor implements FileParser {
 
     private boolean isBankMetadata(String line) {
         String upper = line.toUpperCase().trim();
-        // Bank name, account holder info, address lines, etc.
         return upper.startsWith("BBVA PROVINCIAL")
-                || upper.startsWith("PROVINCIAL")
                 || upper.contains("ESTADO DE CUENTA CORRIENTE")
                 || upper.contains("DETALLE DE MOVIMIENTOS")
                 || upper.contains("RIF:")
@@ -370,9 +418,21 @@ public class ProvincialBankStatementProcessor implements FileParser {
                 || upper.startsWith("CLIENTE:")
                 || upper.startsWith("PERIODO:")
                 || upper.startsWith("PERÍODO:")
-                || upper.startsWith("MONEDA:");
+                || upper.startsWith("MONEDA:")
+                || upper.startsWith("TITULAR:")
+                || upper.startsWith("NRO. DE CUENTA:")
+                || upper.contains("A PARTIR DEL")
+                || upper.contains("EXPRESIÓN MONETARIA")
+                || upper.contains("EXPRESION MONETARIA")
+                || upper.contains("PUEDE VALIDAR")
+                || upper.contains("LINEA PROVINCIAL")
+                || upper.contains("CONFORMACION:");
     }
 
+    /**
+     * Heurística de fallback para determinar si una transacción es retiro,
+     * usada SOLO cuando no hay SALDO anterior disponible.
+     */
     private boolean isWithdrawalKeyword(String descUpper) {
         return descUpper.contains("CARGO")
                 || descUpper.contains("CHEQUE")
@@ -386,11 +446,17 @@ public class ProvincialBankStatementProcessor implements FileParser {
                 || descUpper.contains("DOMICILIACIÓN")
                 || descUpper.contains("COMISION")
                 || descUpper.contains("COMISIÓN")
+                || descUpper.contains("COMIS.")
                 || descUpper.contains("I.G.T.F")
-                || descUpper.contains("IGTF");
+                || descUpper.contains("IGTF")
+                || descUpper.contains("TRASP.")
+                || descUpper.contains("COM TRF")
+                || descUpper.contains("CR.I/OB");
     }
 
-    // ── Amount extraction ────────────────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Extracción de Montos
+    // ═══════════════════════════════════════════════════════════════════════════
 
     private static class AmountMatch {
         final BigDecimal value;
@@ -403,7 +469,8 @@ public class ProvincialBankStatementProcessor implements FileParser {
     }
 
     /**
-     * Finds all monetary amounts in a string and returns them with their positions.
+     * Encuentra todos los montos monetarios en un texto, con sus posiciones.
+     * Ignora valores que parecen ser años (ej. 2025).
      */
     private List<AmountMatch> findAllAmounts(String text) {
         List<AmountMatch> matches = new ArrayList<>();
@@ -419,9 +486,9 @@ public class ProvincialBankStatementProcessor implements FileParser {
     }
 
     /**
-     * Extracts raw amounts (without position tracking) for saldo inicial detection.
+     * Extrae montos sin tracking de posición, para la detección de SALDO ANTERIOR.
      */
-    private List<BigDecimal> extractAmounts(String text) {
+    private List<BigDecimal> extractAmountsFromText(String text) {
         List<BigDecimal> amounts = new ArrayList<>();
         Matcher m = AMOUNT_PATTERN.matcher(text);
         while (m.find()) {
@@ -434,33 +501,25 @@ public class ProvincialBankStatementProcessor implements FileParser {
     }
 
     /**
-     * Parses a Provincial-format amount string:
+     * Parsea un monto del formato Provincial:
      * <ol>
-     * <li>Strip thousand-separator commas</li>
-     * <li>Replace OCR dash-decimal ({@code -}) with actual dot</li>
-     * <li>Parse as {@link BigDecimal}</li>
+     * <li>Elimina comas de miles</li>
+     * <li>Reemplaza guión decimal OCR ({@code 3087990-20} →
+     * {@code 3087990.20})</li>
+     * <li>Parsea como {@link BigDecimal}</li>
      * </ol>
-     * Examples: {@code "3,087,990-20"} → {@code 3087990.20},
-     * {@code "12,365.00"} → {@code 12365.00}
      */
     private BigDecimal parseProvincialAmount(String raw) {
         if (raw == null || raw.trim().isEmpty())
             return null;
         try {
-            String cleaned = raw.trim();
+            String cleaned = raw.trim().replace(",", "");
 
-            // Remove thousand-separator commas
-            cleaned = cleaned.replace(",", "");
-
-            // Handle OCR artifact: dash used as decimal separator
-            // Pattern: digits-digits (e.g. "3087990-20")
-            // But NOT if it looks like a date (handled separately)
+            // OCR artifact: guión como separador decimal
             if (cleaned.contains("-")) {
-                // Replace the LAST dash with a dot (decimal separator)
                 int lastDash = cleaned.lastIndexOf('-');
                 if (lastDash > 0 && lastDash < cleaned.length() - 1) {
                     String afterDash = cleaned.substring(lastDash + 1);
-                    // Only treat as decimal if after-dash part is exactly 2 digits
                     if (afterDash.length() == 2 && afterDash.matches("\\d{2}")) {
                         cleaned = cleaned.substring(0, lastDash) + "." + afterDash;
                     }
@@ -473,30 +532,86 @@ public class ProvincialBankStatementProcessor implements FileParser {
         }
     }
 
-    // ── Description cleanup ──────────────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Limpieza de Descripción
+    // ═══════════════════════════════════════════════════════════════════════════
 
     /**
-     * Cleans a multi-line description:
-     * - Remove embedded dates (F.VALOR repetitions)
-     * - Collapse whitespace
+     * Limpia la descripción: elimina fechas inline (F.VALOR) y colapsa espacios.
      */
     private String cleanDescription(String desc) {
         if (desc == null)
             return "";
-        // Remove any inline dates (DD-MM-YYYY) that leaked from F.VALOR column
         String cleaned = desc.replaceAll("\\d{2}-\\d{2}-\\d{4}", "").trim();
-        // Collapse multiple spaces
         cleaned = cleaned.replaceAll("\\s{2,}", " ").trim();
         return cleaned;
     }
 
-    // ── PDF text extraction ──────────────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Extracción de Texto PDF
+    // ═══════════════════════════════════════════════════════════════════════════
 
     private String extractText(File file) throws Exception {
         try (PDDocument document = Loader.loadPDF(file)) {
             PDFTextStripper stripper = new PDFTextStripper();
-            stripper.setSortByPosition(true); // Critical for tabular PDFs
+            stripper.setSortByPosition(true); // Crítico para PDFs tabulares
             return stripper.getText(document);
         }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Diálogo de Error Crítico (JOptionPane)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Muestra un diálogo modal de error para que el usuario reconozca el problema.
+     * 
+     * @return {@code true} si desea continuar, {@code false} para abortar
+     */
+    private boolean showCriticalError(int lineNumber, String rawLineContent,
+            Exception exception, String userHint) {
+        System.err.println("ERROR en línea " + lineNumber + ": " + exception.getMessage());
+        exception.printStackTrace();
+
+        String displayLine = rawLineContent;
+        if (displayLine != null && displayLine.length() > 200) {
+            displayLine = displayLine.substring(0, 200) + "...";
+        }
+
+        String message = String.format(
+                """
+                        ══════════════════════════════════════════
+                             ERROR EN ESTADO DE CUENTA PDF
+                        ══════════════════════════════════════════
+
+                        ► Línea Nº: %d
+                        ► Contenido de la línea:
+                          %s
+
+                        ► Causa Técnica:
+                          Tipo: %s
+                          Detalle: %s
+
+                        ► Acción Requerida:
+                          %s
+
+                        ══════════════════════════════════════════
+                        ¿Desea continuar procesando las líneas restantes?
+                        (Seleccione "No" para abortar el procesamiento)
+                        """,
+                lineNumber,
+                displayLine != null ? displayLine : "(no disponible)",
+                exception.getClass().getSimpleName(),
+                exception.getMessage() != null ? exception.getMessage() : "(sin mensaje)",
+                userHint);
+
+        int result = JOptionPane.showConfirmDialog(
+                null,
+                message,
+                ERROR_DIALOG_TITLE,
+                JOptionPane.YES_NO_OPTION,
+                JOptionPane.ERROR_MESSAGE);
+
+        return result == JOptionPane.YES_OPTION;
     }
 }

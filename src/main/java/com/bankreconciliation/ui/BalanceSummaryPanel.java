@@ -6,13 +6,22 @@ import net.miginfocom.swing.MigLayout;
 import javax.swing.*;
 import java.awt.*;
 import java.awt.geom.RoundRectangle2D;
-import java.text.NumberFormat;
 import java.util.List;
-import java.util.Locale;
 
 public class BalanceSummaryPanel extends JPanel {
 
-    private static final NumberFormat FMT = NumberFormat.getCurrencyInstance(Locale.US);
+    private static final java.text.DecimalFormat FMT;
+
+    static {
+        java.text.DecimalFormatSymbols symbols = new java.text.DecimalFormatSymbols(java.util.Locale.US);
+        symbols.setGroupingSeparator(',');
+        symbols.setDecimalSeparator('.');
+        FMT = new java.text.DecimalFormat("#,##0.00", symbols);
+    }
+
+    private static String formatBs(double value) {
+        return "Bs. " + FMT.format(value);
+    }
 
     private final List<Transaction> bookTransactions;
     private final List<Transaction> bankTransactions;
@@ -122,13 +131,13 @@ public class BalanceSummaryPanel extends JPanel {
 
         double reconciledBalance = bankBalance + transitDeposits - transitChecks + adjustments;
 
-        bankBalanceValue.setText(FMT.format(bankBalance));
-        transitDepositsValue.setText(FMT.format(transitDeposits));
+        bankBalanceValue.setText(formatBs(bankBalance));
+        transitDepositsValue.setText(formatBs(transitDeposits));
         transitDepositsValue.setForeground(new Color(76, 175, 80));
-        transitChecksValue.setText(FMT.format(transitChecks));
+        transitChecksValue.setText(formatBs(transitChecks));
         transitChecksValue.setForeground(new Color(244, 67, 54));
-        adjustmentsValue.setText(FMT.format(adjustments));
-        reconciledBalanceValue.setText(FMT.format(reconciledBalance));
+        adjustmentsValue.setText(formatBs(adjustments));
+        reconciledBalanceValue.setText(formatBs(reconciledBalance));
         reconciledCountValue.setText(String.valueOf(reconciledCount));
     }
 }

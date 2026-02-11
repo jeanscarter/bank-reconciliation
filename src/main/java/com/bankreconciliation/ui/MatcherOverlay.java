@@ -95,7 +95,7 @@ public class MatcherOverlay extends RoundedPanel {
         sourceCard.add(srcDesc);
 
         double amt = source.getAbsAmount();
-        JLabel srcAmt = new JLabel(String.format("$%,.2f", amt));
+        JLabel srcAmt = new JLabel(String.format("Bs. %,.2f", amt));
         srcAmt.setFont(new Font("Segoe UI", Font.BOLD, 18));
         srcAmt.setForeground(source.getDeposit() > 0 ? new Color(76, 175, 80) : new Color(244, 67, 54));
         sourceCard.add(srcAmt, "align right");

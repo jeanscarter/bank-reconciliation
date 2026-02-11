@@ -3,12 +3,21 @@ package com.bankreconciliation.ui.table;
 import javax.swing.*;
 import javax.swing.table.DefaultTableCellRenderer;
 import java.awt.*;
-import java.text.NumberFormat;
+import java.text.DecimalFormat;
+import java.text.DecimalFormatSymbols;
 import java.util.Locale;
 
 public class CurrencyRenderer extends DefaultTableCellRenderer {
 
-    private static final NumberFormat FMT = NumberFormat.getCurrencyInstance(Locale.US);
+    private static final DecimalFormat FMT;
+
+    static {
+        DecimalFormatSymbols symbols = new DecimalFormatSymbols(Locale.US);
+        symbols.setGroupingSeparator(',');
+        symbols.setDecimalSeparator('.');
+        FMT = new DecimalFormat("#,##0.00", symbols);
+    }
+
     private final boolean highlightNonZero;
 
     public CurrencyRenderer(boolean highlightNonZero) {
