@@ -2,207 +2,264 @@ package com.bankreconciliation.parser;
 
 import com.bankreconciliation.model.Transaction;
 
+import javax.swing.*;
 import java.io.*;
-import java.nio.charset.Charset;
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Pattern;
 
 /**
- * Specialized parser for Banco Provincial "Libro Contable" CSV export files.
- *
+ * Procesador para "Libro Contable" del Banco Provincial (CSV/Excel).
  * <p>
- * The Provincial export is NOT a flat table — it is a report with interleaved
- * metadata rows:
+ * <b>Estructura Jerárquica del Archivo:</b>
  * <ul>
- * <li><b>Date control rows:</b> A single Excel serial number (e.g.
- * {@code 45992.0})
- * in column 0 with all other columns empty. This "sticky date" applies to all
- * subsequent transactions until the next date-control row.</li>
- * <li><b>Transaction rows:</b> Begin with a zero-padded ID (e.g.
- * {@code 0000017835}),
- * have a populated Nro. Doc. column, and are not anuladas.</li>
- * <li><b>Discard rows:</b> Headers, sub-totals, closing separators, and rows
- * whose
- * description is exactly {@code *ANULADO*}.</li>
+ * <li><b>Fila de Fecha (Control):</b> Primera columna contiene un "Excel Serial
+ * Date"
+ * (ej. 45992.0). Define la fecha para todas las transacciones
+ * subsiguientes.</li>
+ * <li><b>Fila de Transacción:</b> Comienza con un número de secuencia (ej.
+ * 0000017835).
+ * Contiene Referencia, Descripción, Debe y Haber.</li>
+ * <li><b>Filas de Ruido:</b> Cabeceras, sub-totales, y filas vacías que se
+ * ignoran.</li>
  * </ul>
- *
- * <h3>Column mapping (0-indexed):</h3>
- * 
- * <pre>
- *   0 → Número (line ID / serial date)
- *   3 → Tipo (TP, TR, DP — informational only)
- *   4 → Nro. Doc.   → Reference
- *   6 → Descripción → Description
- *   8 → Debe        → Deposit  (increments balance for Libro Contable)
- *   9 → Haber       → Withdrawal (decrements balance for Libro Contable)
- * </pre>
- *
- * Columns 1, 2, 5, 7 (Origen), and 10 (I.G.T.F.) are intentionally ignored.
+ * <p>
+ * <b>Manejo de Errores:</b> Todos los errores de procesamiento disparan una
+ * ventana modal
+ * {@link JOptionPane} que detalla la línea, contenido crudo y causa técnica.
+ * El usuario puede elegir continuar o abortar el procesamiento.
  */
 public class ProvincialLibroProcessor implements FileParser {
 
-    // Excel epoch: December 30, 1899
+    // ─── Constantes ──────────────────────────────────────────────────────────────
+    /** Epoch de Excel: 30 de diciembre de 1899 (convención estándar). */
     private static final LocalDate EXCEL_EPOCH = LocalDate.of(1899, 12, 30);
 
-    // Column indices in the Provincial CSV
-    private static final int COL_NUMERO = 0;
-    private static final int COL_TIPO = 3;
-    private static final int COL_NRO_DOC = 4;
+    /**
+     * Patrón para detectar "Excel Serial Date" en columna 0 (ej. "45992.0" o
+     * "45992").
+     */
+    private static final Pattern SERIAL_DATE_PATTERN = Pattern.compile("^\\d{4,6}(\\.\\d+)?$");
+
+    /**
+     * Patrón para detectar fila de transacción: secuencia numérica en columna 0.
+     */
+    private static final Pattern TRANSACTION_SEQ_PATTERN = Pattern.compile("^\\d+$");
+
+    // ─── Índices de Columna ──────────────────────────────────────────────────────
+    private static final int COL_SERIAL_DATE = 0;
+    private static final int COL_REFERENCIA = 4;
     private static final int COL_DESCRIPCION = 6;
     private static final int COL_DEBE = 8;
     private static final int COL_HABER = 9;
 
-    // ── FileParser interface ─────────────────────────────────────────────────
+    // ─── Título del diálogo de error ─────────────────────────────────────────────
+    private static final String ERROR_DIALOG_TITLE = "Error Crítico en Procesamiento de Archivo";
+
+    // ═══════════════════════════════════════════════════════════════════════════════
+    // Interfaz FileParser
+    // ═══════════════════════════════════════════════════════════════════════════════
 
     @Override
     public List<Transaction> parse(File file, Transaction.Source source) throws Exception {
-        List<String> lines = readAllLines(file);
+        System.out.println("Iniciando procesamiento de archivo: " + file.getName());
+
+        List<String> lines;
+        try {
+            lines = readAllLines(file);
+        } catch (IOException ioEx) {
+            // ── Error de I/O al leer el archivo: diálogo modal inmediato ──
+            showCriticalError(0, file.getAbsolutePath(), ioEx,
+                    "No se pudo leer el archivo. Verifique que existe, no está bloqueado y tiene permisos de lectura.");
+            throw ioEx;
+        }
+
         return processLines(lines, source);
     }
 
     @Override
     public double extractSaldoInicial(File file) {
-        // Provincial Libro Contable exports do not include an explicit "Saldo Inicial"
         return 0.0;
     }
 
-    // ── Static detection helper ──────────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════════════════════════════
+    // Detección de formato
+    // ═══════════════════════════════════════════════════════════════════════════════
 
     /**
-     * Heuristic check: does this CSV look like a Banco Provincial Libro Contable
-     * export? We inspect the first 5 non-empty lines for the signature header
-     * fragment {@code "Número"} combined with {@code "Nro. Doc."} or a serial-date
-     * row pattern.
+     * Heurística para detectar si un archivo es del formato Provincial (Libro
+     * Contable).
      */
     public static boolean isProvincialFormat(File file) {
         try (BufferedReader br = new BufferedReader(
-                new InputStreamReader(new FileInputStream(file), detectCharset(file)))) {
-            int checked = 0;
+                new InputStreamReader(new FileInputStream(file), StandardCharsets.ISO_8859_1))) {
             String line;
-            while ((line = br.readLine()) != null && checked < 10) {
-                String trimmed = line.trim();
-                if (trimmed.isEmpty())
-                    continue;
-                checked++;
-                // Check for Provincial header signature
-                if (trimmed.contains("Número") && trimmed.contains("Nro. Doc.")) {
+            int checkLimit = 15;
+            while ((line = br.readLine()) != null && checkLimit-- > 0) {
+                if (line.contains("Número") && line.contains("Nro. Doc."))
                     return true;
-                }
-                // Check for the characteristic column pattern: "Número,Cuenta,..."
-                if (trimmed.startsWith("Número,Cuenta") || trimmed.startsWith("\"Número\",\"Cuenta\"")) {
+                if (line.contains("4599") && line.contains(",,,"))
                     return true;
-                }
-                // Check for serial-date row (single numeric value like 45992.0)
-                if (isSerialDateRow(splitCSV(trimmed))) {
-                    return true;
-                }
             }
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            e.printStackTrace();
         }
         return false;
     }
 
-    // ── Core processing logic ────────────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════════════════════════════
+    // Motor Principal de Procesamiento
+    // ═══════════════════════════════════════════════════════════════════════════════
 
-    private List<Transaction> processLines(List<String> lines, Transaction.Source source) {
+    /**
+     * Procesa todas las líneas del archivo con la lógica jerárquica:
+     * <ol>
+     * <li>Detecta filas de fecha y actualiza {@code currentDate}.</li>
+     * <li>Filtra filas de ruido (cabeceras, sub-totales, vacías, *ANULADO*).</li>
+     * <li>Extrae datos de transacción usando {@code currentDate} como fecha.</li>
+     * </ol>
+     * Cada línea se procesa dentro de un try-catch granular. Si ocurre un error,
+     * se muestra un {@link JOptionPane} modal y el usuario decide si continuar.
+     */
+    private List<Transaction> processLines(List<String> lines, Transaction.Source source) throws Exception {
         List<Transaction> transactions = new ArrayList<>();
+        // ── FECHA JERÁRQUICA: inicia en null, se actualiza al encontrar fila de fecha
+        // ──
         LocalDate currentDate = null;
+        int lineNumber = 0;
 
         for (String rawLine : lines) {
+            lineNumber++;
             String line = rawLine.trim();
             if (line.isEmpty())
                 continue;
 
-            String[] cells = splitCSV(line);
+            // ── TRY-CATCH GRANULAR POR LÍNEA ──────────────────────────────
+            try {
+                String[] cells = splitCSV(line);
 
-            // ─── Classification: which kind of row is this? ───
-
-            // 1. DISCARD: header row
-            if (isHeaderRow(cells))
-                continue;
-
-            // 2. DISCARD: sub-total/closing row
-            if (isSubTotalOrClosingRow(cells))
-                continue;
-
-            // 3. DATE CONTROL: serial date row
-            if (isSerialDateRow(cells)) {
-                try {
-                    currentDate = parseSerialDate(cells[0]);
-                } catch (NumberFormatException e) {
-                    // Invalid serial — skip but keep processing
+                // ─────────────────────────────────────────────────────────────
+                // 1. DETECCIÓN DE FECHA JERÁRQUICA (Fila de Control)
+                // Si col 0 es un Excel Serial Date (ej. 45992.0), se convierte
+                // a LocalDate y se establece como currentDate para todas las
+                // transacciones subsecuentes.
+                // ─────────────────────────────────────────────────────────────
+                if (isSerialDateRow(cells)) {
+                    currentDate = parseSerialDate(cells[COL_SERIAL_DATE]);
+                    continue;
                 }
-                continue;
-            }
 
-            // 4. DISCARD: *ANULADO* transactions
-            if (isAnulado(cells))
-                continue;
+                // ─────────────────────────────────────────────────────────────
+                // 2. FILTROS DE RUIDO
+                // Se ignoran: cabeceras, sub-totales, y filas con pocas columnas.
+                // ─────────────────────────────────────────────────────────────
+                if (cells.length > 0 && cells[0].startsWith("Número"))
+                    continue;
+                if (rawLine.contains("Sub-Totales"))
+                    continue;
+                if (cells.length <= COL_HABER)
+                    continue;
 
-            // 5. TRANSACTION: valid data row
-            if (isValidTransaction(cells)) {
-                if (currentDate == null)
-                    continue; // No date context yet — skip
+                // ─────────────────────────────────────────────────────────────
+                // 3. DETECCIÓN DE FILA DE TRANSACCIÓN
+                // Col 0 debe ser un número de secuencia (regex ^\d+$)
+                // y currentDate no debe ser null.
+                // ─────────────────────────────────────────────────────────────
+                String col0 = cleanField(cells[COL_SERIAL_DATE]);
+                if (!TRANSACTION_SEQ_PATTERN.matcher(col0).matches())
+                    continue;
 
-                Transaction txn = buildTransaction(cells, currentDate, source);
-                if (txn != null) {
-                    transactions.add(txn);
+                // 3a. Extracción y limpieza de campos
+                String referencia = cleanField(cells[COL_REFERENCIA]);
+                String descripcion = cleanField(cells[COL_DESCRIPCION]);
+
+                // Excluir transacciones anuladas
+                if (descripcion.contains("*ANULADO*"))
+                    continue;
+                // Excluir filas sin datos útiles
+                if (referencia.isEmpty() && descripcion.isEmpty())
+                    continue;
+
+                // ─────────────────────────────────────────────────────────────
+                // 4. VALIDACIÓN DE MONTOS
+                // Se usa BigDecimal como paso intermedio para robustez,
+                // luego se convierte a double (compatible con Transaction).
+                // Si la celda está vacía/nula, se trata como 0.00.
+                // ─────────────────────────────────────────────────────────────
+                double debe = parseAmountSafe(cells[COL_DEBE]);
+                double haber = parseAmountSafe(cells[COL_HABER]);
+
+                // No registrar transacciones sin movimiento
+                if (debe == 0 && haber == 0)
+                    continue;
+
+                // ─────────────────────────────────────────────────────────────
+                // 5. VALIDACIÓN DE FECHA
+                // Si no se ha detectado ninguna fila de fecha antes de esta
+                // transacción, se dispara el diálogo de error.
+                // ─────────────────────────────────────────────────────────────
+                if (currentDate == null) {
+                    throw new IllegalStateException(
+                            "Transacción encontrada en línea " + lineNumber
+                                    + " antes de detectar una fila de fecha válida. "
+                                    + "Verifique que el archivo contiene filas de fecha (Excel Serial Date) "
+                                    + "antes de las transacciones.");
                 }
+
+                // ── Crear y agregar la transacción ──
+                transactions.add(new Transaction(
+                        currentDate,
+                        referencia,
+                        descripcion,
+                        debe,
+                        haber,
+                        source));
+
+            } catch (Exception ex) {
+                // ═══════════════════════════════════════════════════════════════
+                // MANEJO DE ERRORES CRÍTICO — VENTANA MODAL JOptionPane
+                // Cualquier error (NumberFormatException, IndexOutOfBounds,
+                // IllegalStateException, etc.) dispara un diálogo modal que
+                // obliga al usuario a reconocer el problema.
+                // ═══════════════════════════════════════════════════════════════
+                boolean continuar = showCriticalError(lineNumber, rawLine, ex,
+                        "Verifique el formato de la celda en la línea indicada.");
+
+                if (!continuar) {
+                    // El usuario eligió abortar; devolver lo que se procesó hasta ahora
+                    System.err.println("Procesamiento abortado por el usuario en línea " + lineNumber);
+                    return transactions;
+                }
+                // Si el usuario eligió continuar, la línea se omite y seguimos
             }
         }
 
+        System.out.println("Procesamiento finalizado. Total transacciones: " + transactions.size());
         return transactions;
     }
 
-    // ── Row classifiers ──────────────────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════════════════════════════
+    // Métodos de Detección y Parsing
+    // ═══════════════════════════════════════════════════════════════════════════════
 
     /**
-     * Header row: starts with "Número" or contains "Cuenta" at expected positions.
+     * Detecta si una fila es una "Fila de Fecha" (Control).
+     * Criterio: col 0 coincide con el patrón de fecha serial y las columnas 1-4
+     * están vacías.
      */
-    private boolean isHeaderRow(String[] cells) {
+    private boolean isSerialDateRow(String[] cells) {
         if (cells.length == 0)
             return false;
-        String first = cleanField(cells[0]);
-        return "Número".equalsIgnoreCase(first)
-                || "Numero".equalsIgnoreCase(first)
-                || first.startsWith("Número");
-    }
-
-    /**
-     * Sub-total or closing separator row.
-     * - Column 7 contains "Sub-Totales:"
-     * - Or all columns empty except column 0 with a high serial value acting as
-     * footer
-     */
-    private boolean isSubTotalOrClosingRow(String[] cells) {
-        if (cells.length > 7) {
-            String col7 = cleanField(cells[7]);
-            if (col7.contains("Sub-Totales") || col7.contains("Sub-Total")) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /**
-     * Date-control row: column 0 has a numeric value with decimal (e.g. 45992.0),
-     * and all other meaningful columns are empty or null.
-     */
-    private static boolean isSerialDateRow(String[] cells) {
-        if (cells.length == 0)
-            return false;
-        String first = cleanField(cells[0]);
-        if (first.isEmpty())
+        String col0 = cleanField(cells[0]);
+        if (!SERIAL_DATE_PATTERN.matcher(col0).matches())
             return false;
 
-        // Must look like a decimal number (Excel serial date)
-        if (!first.matches("\\d{4,6}\\.\\d+"))
-            return false;
-
-        // Remaining columns should be empty
-        for (int i = 1; i < cells.length; i++) {
+        // Las filas de fecha típicamente tienen las columnas 1-4 vacías
+        int checkUntil = Math.min(cells.length, 5);
+        for (int i = 1; i < checkUntil; i++) {
             if (!cleanField(cells[i]).isEmpty())
                 return false;
         }
@@ -210,184 +267,161 @@ public class ProvincialLibroProcessor implements FileParser {
     }
 
     /**
-     * Transaction is anulada if description (column 6) is exactly "*ANULADO*".
+     * Convierte un "Excel Serial Date" (ej. "45992.0") a {@link LocalDate}.
+     * Fórmula: EXCEL_EPOCH (1899-12-30) + serialValue días.
      */
-    private boolean isAnulado(String[] cells) {
-        if (cells.length <= COL_DESCRIPCION)
-            return false;
-        String desc = cleanField(cells[COL_DESCRIPCION]);
-        return "*ANULADO*".equals(desc);
+    private LocalDate parseSerialDate(String raw) {
+        double serialVal = Double.parseDouble(cleanField(raw));
+        return EXCEL_EPOCH.plusDays((long) serialVal);
     }
 
     /**
-     * Valid transaction: column 0 has an ID-like format (numeric, possibly
-     * zero-padded),
-     * and Nro. Doc. (column 4) is not empty.
+     * Parsea un monto de forma segura usando {@link BigDecimal} como paso
+     * intermedio.
+     * <ul>
+     * <li>Elimina comillas y espacios.</li>
+     * <li>Elimina comas de miles (ej. "1,234.56" → "1234.56").</li>
+     * <li>Si el campo está vacío o nulo, retorna 0.0.</li>
+     * </ul>
+     *
+     * @param raw el valor crudo de la celda CSV
+     * @return el monto como double, o 0.0 si está vacío
+     * @throws NumberFormatException si el valor no puede parsearse como número
      */
-    private boolean isValidTransaction(String[] cells) {
-        if (cells.length <= COL_HABER)
-            return false;
-        String id = cleanField(cells[COL_NUMERO]);
-        String nroDoc = cleanField(cells[COL_NRO_DOC]);
-        // ID should be numeric (zero-padded like 0000017835)
-        return !id.isEmpty() && id.matches("\\d+") && !nroDoc.isEmpty();
-    }
-
-    // ── Transaction builder ──────────────────────────────────────────────────
-
-    private Transaction buildTransaction(String[] cells, LocalDate date, Transaction.Source source) {
-        try {
-            String reference = cleanField(cells[COL_NRO_DOC]);
-            if (reference.isEmpty())
-                reference = "S/N";
-
-            String description = cleanField(cells[COL_DESCRIPCION]);
-
-            double debe = parseAmount(cells[COL_DEBE]); // Deposit for Libro Contable
-            double haber = parseAmount(cells[COL_HABER]); // Withdrawal for Libro Contable
-
-            return new Transaction(date, reference, description, debe, haber, source);
-        } catch (Exception e) {
-            // Malformed row — skip silently
-            return null;
-        }
-    }
-
-    // ── Date conversion ──────────────────────────────────────────────────────
-
-    /**
-     * Converts an Excel serial date string to {@link LocalDate}.
-     * Excel epoch = December 30, 1899.
-     * e.g. 45992.0 → 2025-12-31
-     */
-    private LocalDate parseSerialDate(String rawValue) throws NumberFormatException {
-        String cleaned = cleanField(rawValue);
-        double serialDouble = Double.parseDouble(cleaned);
-        long serialDays = (long) serialDouble;
-        return EXCEL_EPOCH.plusDays(serialDays);
-    }
-
-    // ── Amount parsing ───────────────────────────────────────────────────────
-
-    /**
-     * Cleans and parses a monetary amount:
-     * <ol>
-     * <li>Remove surrounding quotes</li>
-     * <li>Remove thousand-separator commas</li>
-     * <li>If empty, return 0.0</li>
-     * </ol>
-     */
-    private double parseAmount(String raw) {
-        String cleaned = cleanField(raw);
-        if (cleaned.isEmpty())
+    private double parseAmountSafe(String raw) throws NumberFormatException {
+        if (raw == null)
             return 0.0;
 
-        // Remove thousand-separator commas: "1,234,567.89" → "1234567.89"
-        cleaned = cleaned.replace(",", "");
+        // Eliminar comillas y espacios
+        String clean = raw.replaceAll("\"", "").trim();
+        // Eliminar comas (separadores de miles, ej. "1,234.56")
+        clean = clean.replace(",", "");
 
-        try {
-            return Double.parseDouble(cleaned);
-        } catch (NumberFormatException e) {
+        if (clean.isEmpty())
             return 0.0;
-        }
+
+        // Usar BigDecimal para parsing preciso, luego convertir a double
+        return new BigDecimal(clean).doubleValue();
     }
 
-    // ── CSV field utilities ──────────────────────────────────────────────────
+    /**
+     * Limpia un campo CSV: elimina comillas externas y espacios.
+     */
+    private String cleanField(String raw) {
+        if (raw == null)
+            return "";
+        return raw.trim().replaceAll("^\"|\"$", "").trim();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════
+    // CSV Parser y Lectura de Archivo
+    // ═══════════════════════════════════════════════════════════════════════════════
 
     /**
-     * Splits a CSV line respecting double-quote text qualifiers.
-     * Handles: {@code "field with, comma",normal,""empty""}
+     * Parser CSV que respeta comillas pero NO las incluye en el resultado.
+     * Maneja campos entrecomillados que contienen comas internas.
      */
-    static String[] splitCSV(String line) {
-        List<String> fields = new ArrayList<>();
+    private String[] splitCSV(String line) {
+        List<String> result = new ArrayList<>();
         StringBuilder current = new StringBuilder();
         boolean inQuotes = false;
-
-        for (int i = 0; i < line.length(); i++) {
-            char c = line.charAt(i);
-
-            if (c == '"') {
-                if (inQuotes && i + 1 < line.length() && line.charAt(i + 1) == '"') {
-                    // Escaped quote inside quoted field
-                    current.append('"');
-                    i++;
-                } else {
-                    inQuotes = !inQuotes;
-                }
-            } else if (c == ',' && !inQuotes) {
-                fields.add(current.toString());
+        for (char c : line.toCharArray()) {
+            if (c == '"')
+                inQuotes = !inQuotes;
+            else if (c == ',' && !inQuotes) {
+                result.add(current.toString());
                 current.setLength(0);
             } else {
                 current.append(c);
             }
         }
-        fields.add(current.toString()); // last field
-
-        return fields.toArray(new String[0]);
+        result.add(current.toString());
+        return result.toArray(new String[0]);
     }
 
     /**
-     * Strips surrounding whitespace and double quotes from a field value.
+     * Lee todas las líneas del archivo, intentando primero UTF-8 y cayendo a
+     * ISO-8859-1.
      */
-    private static String cleanField(String raw) {
-        if (raw == null)
-            return "";
-        String s = raw.trim();
-        // Remove surrounding double quotes
-        if (s.length() >= 2 && s.startsWith("\"") && s.endsWith("\"")) {
-            s = s.substring(1, s.length() - 1).trim();
-        }
-        return s;
-    }
-
-    // ── File I/O ─────────────────────────────────────────────────────────────
-
     private List<String> readAllLines(File file) throws IOException {
-        Charset charset = detectCharset(file);
-        List<String> lines = new ArrayList<>();
-        try (BufferedReader br = new BufferedReader(new InputStreamReader(new FileInputStream(file), charset))) {
-            String line;
-            while ((line = br.readLine()) != null) {
-                lines.add(line);
-            }
+        try {
+            return java.nio.file.Files.readAllLines(file.toPath(), StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            return java.nio.file.Files.readAllLines(file.toPath(), StandardCharsets.ISO_8859_1);
         }
-        return lines;
     }
 
+    // ═══════════════════════════════════════════════════════════════════════════════
+    // Diálogo de Error Crítico (JOptionPane)
+    // ═══════════════════════════════════════════════════════════════════════════════
+
     /**
-     * Tries UTF-8 first; falls back to ISO-8859-1 if BOM or encoding markers
-     * suggest it.
+     * Muestra una ventana modal de error crítico con detalles completos del fallo.
+     * <p>
+     * El diálogo incluye:
+     * <ul>
+     * <li>Número de línea exacto donde ocurrió el error.</li>
+     * <li>Contenido crudo de la línea que falló.</li>
+     * <li>Tipo de excepción y mensaje técnico.</li>
+     * <li>Instrucción al usuario para verificar el archivo.</li>
+     * </ul>
+     * El usuario puede elegir "Sí" para continuar procesando o "No" para abortar.
+     *
+     * @param lineNumber     número de línea donde ocurrió el error (0 si es error
+     *                       de I/O global)
+     * @param rawLineContent contenido crudo de la línea (o ruta del archivo si es
+     *                       error de I/O)
+     * @param exception      la excepción capturada
+     * @param userHint       instrucción adicional para el usuario
+     * @return {@code true} si el usuario desea continuar, {@code false} para
+     *         abortar
      */
-    private static Charset detectCharset(File file) {
-        try (InputStream is = new FileInputStream(file)) {
-            byte[] bom = new byte[3];
-            int read = is.read(bom);
-            if (read >= 3 && bom[0] == (byte) 0xEF && bom[1] == (byte) 0xBB && bom[2] == (byte) 0xBF) {
-                return StandardCharsets.UTF_8;
-            }
-        } catch (IOException ignored) {
+    private boolean showCriticalError(int lineNumber, String rawLineContent,
+            Exception exception, String userHint) {
+        // También imprimir en consola para logs
+        System.err.println("ERROR CRÍTICO en línea " + lineNumber + ": " + exception.getMessage());
+        exception.printStackTrace();
+
+        // Truncar línea si es demasiado larga para el diálogo
+        String displayLine = rawLineContent;
+        if (displayLine != null && displayLine.length() > 200) {
+            displayLine = displayLine.substring(0, 200) + "...";
         }
 
-        // Quick heuristic: if file contains bytes > 0x7F that aren't valid UTF-8,
-        // assume Latin-1
-        try (InputStream is = new FileInputStream(file)) {
-            byte[] sample = new byte[4096];
-            int read = is.read(sample);
-            for (int i = 0; i < read; i++) {
-                int b = sample[i] & 0xFF;
-                if (b > 0x7F) {
-                    // Check if it could be a valid UTF-8 multi-byte sequence
-                    if ((b & 0xE0) == 0xC0 && i + 1 < read && (sample[i + 1] & 0xC0) == 0x80) {
-                        i++;
-                        continue;
-                    }
-                    // Not valid UTF-8 — likely Latin-1
-                    return Charset.forName("ISO-8859-1");
-                }
-            }
-        } catch (IOException ignored) {
-        }
+        String message = String.format(
+                """
+                        ══════════════════════════════════════════
+                                 ERROR EN PROCESAMIENTO
+                        ══════════════════════════════════════════
 
-        return StandardCharsets.UTF_8;
+                        ► Línea Nº: %d
+                        ► Contenido de la línea:
+                          %s
+
+                        ► Causa Técnica:
+                          Tipo: %s
+                          Detalle: %s
+
+                        ► Acción Requerida:
+                          %s
+
+                        ══════════════════════════════════════════
+                        ¿Desea continuar procesando las líneas restantes?
+                        (Seleccione "No" para abortar el procesamiento)
+                        """,
+                lineNumber,
+                displayLine != null ? displayLine : "(no disponible)",
+                exception.getClass().getSimpleName(),
+                exception.getMessage() != null ? exception.getMessage() : "(sin mensaje)",
+                userHint);
+
+        int result = JOptionPane.showConfirmDialog(
+                null,
+                message,
+                ERROR_DIALOG_TITLE,
+                JOptionPane.YES_NO_OPTION,
+                JOptionPane.ERROR_MESSAGE);
+
+        return result == JOptionPane.YES_OPTION;
     }
 }
