@@ -371,11 +371,9 @@ public class ReconciliationEngine {
                     double diff = Math.abs(bookTx.getAbsAmount() - bankTx.getAbsAmount());
 
                     // We are looking for differences > 1.00
-                    // And we only care about UNMATCHED transactions (Pending status)
-                    // Or maybe even matched ones? User said "monitor", likely pending ones.
-                    // "no se den para aprobar... me va a servir para chequear".
-                    // Let's filter for PENDING only to avoid noise from already reconciled items.
-                    if (bookTx.isPending() && bankTx.isPending()) {
+                    // And we care about transactions that are NOT Conciliated (OPC)
+                    // This allows finding differences for items marked as DNA, ANR, etc.
+                    if (bookTx.getStatus() != Status.OPC && bankTx.getStatus() != Status.OPC) {
                         if (diff > NEAR_MATCH_TOLERANCE) { // diff > 1.00
                             double signedDiff = bookTx.getAbsAmount() - bankTx.getAbsAmount();
                             largeDiffs.add(new NearMatch(bookTx, bankTx, signedDiff));

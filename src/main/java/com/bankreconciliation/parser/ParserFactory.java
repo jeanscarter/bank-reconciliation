@@ -14,6 +14,10 @@ public class ParserFactory {
             if (ProvincialLibroProcessor.isProvincialFormat(file)) {
                 return new ProvincialLibroProcessor();
             }
+            // Auto-detect Banesco Libro
+            if (BanescoLibroProcessor.isBanescoFormat(file)) {
+                return new BanescoLibroProcessor();
+            }
             return new XlsParser();
         } else if (name.endsWith(".csv")) {
             // Auto-detect Banco Provincial Libro Contable format
@@ -25,6 +29,10 @@ public class ParserFactory {
             // Auto-detect BBVA Provincial bank statement PDF
             if (ProvincialBankStatementProcessor.isProvincialBankStatement(file)) {
                 return new ProvincialBankStatementProcessor();
+            }
+            // Auto-detect Banesco PDF
+            if (BanescoBankStatementProcessor.isBanescoBankStatement(file)) {
+                return new BanescoBankStatementProcessor();
             }
             return new PdfParser();
         } else if (name.endsWith(".txt")) {
