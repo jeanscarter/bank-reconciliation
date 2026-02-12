@@ -20,6 +20,14 @@ error_log.txt
 # ── SENSITIVE: Bank statement test data (NEVER push to GitHub) ──
 test-data/
 
+
 # ── Temporary inspection scripts ──
 InspectXls*.java
 InspectXls*.class
+
+# ── User Data Exclusions ──
+*.pdf
+*.xls
+*.xlsx
+*.csv
+debug_*.txt

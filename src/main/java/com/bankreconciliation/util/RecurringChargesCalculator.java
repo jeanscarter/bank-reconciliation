@@ -25,19 +25,23 @@ public class RecurringChargesCalculator {
             String desc = t.getDescription() == null ? "" : t.getDescription().toUpperCase();
             String key = null;
 
-            if (desc.startsWith("COM"))
+            if (desc.contains("COMISION") || desc.contains("COMISIÓN") || desc.startsWith("COM")) {
                 key = "COMISIONES";
-            else if (desc.startsWith("MANT"))
+            } else if (desc.contains("MANTENIMIENTO") || desc.startsWith("MANT")) {
                 key = "MANTENIMIENTO";
-            else if (desc.startsWith("ITF"))
+            } else if (desc.contains("ITF") || desc.startsWith("ITF")) {
                 key = "ITF";
-            else if (desc.startsWith("IVA"))
+            } else if (desc.contains("IVA") || desc.startsWith("IVA")) {
                 key = "IVA";
-            else if (desc.contains("CHEQUERA"))
+            } else if (desc.contains("CHEQUERA")) {
                 key = "CHEQUERA";
+            }
 
             if (key != null) {
-                recurringMap.put(key, recurringMap.get(key) + t.getAbsAmount());
+                Double current = recurringMap.get(key);
+                if (current == null)
+                    current = 0.0;
+                recurringMap.put(key, current + t.getAbsAmount());
             }
         }
         return recurringMap;

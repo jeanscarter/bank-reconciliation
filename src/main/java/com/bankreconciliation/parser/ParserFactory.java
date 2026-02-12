@@ -34,6 +34,14 @@ public class ParserFactory {
             if (BanescoBankStatementProcessor.isBanescoBankStatement(file)) {
                 return new BanescoBankStatementProcessor();
             }
+            // Auto-detect BNC PDF
+            if (BncBankStatementProcessor.isBncBankStatement(file)) {
+                return new BncBankStatementProcessor();
+            }
+            // Auto-detect Profit Ledger (PDF)
+            if (BncProfitLedgerProcessor.isProfitLedger(file)) {
+                return new BncProfitLedgerProcessor();
+            }
             return new PdfParser();
         } else if (name.endsWith(".txt")) {
             return new TxtParser();
