@@ -13,11 +13,12 @@ import java.text.DecimalFormat;
 import java.text.DecimalFormatSymbols;
 import java.util.List;
 import java.util.Locale;
+import java.util.stream.Collectors;
 
 /**
  * Overlay para revisar transacciones con diferencias mínimas (near-matches).
  * Muestra ambos lados (Libro vs Banco) con la diferencia resaltada.
- * El usuario puede aprobar cada par individualmente o aprobar todos.
+ * Soporta coincidencias de Uno-a-Uno y Muchos-a-Uno.
  */
 public class NearMatchReviewOverlay extends RoundedPanel {
 
@@ -42,7 +43,7 @@ public class NearMatchReviewOverlay extends RoundedPanel {
         this.approved = new boolean[nearMatches.size()];
 
         setBackground(new Color(40, 44, 52));
-        setPreferredSize(new Dimension(920, 600));
+        setPreferredSize(new Dimension(1000, 600)); // Wider for groups
         setLayout(new MigLayout("insets 28, fill, wrap", "[grow]", "[][][][grow][]"));
 
         buildUI();
@@ -61,7 +62,7 @@ public class NearMatchReviewOverlay extends RoundedPanel {
 
         // Subtitle
         JLabel subtitle = new JLabel(
-                nearMatches.size() + " par(es) con diferencias menores a Bs. 1.00 encontrado(s)");
+                nearMatches.size() + " grupo(s) con diferencias encontradas");
         subtitle.setFont(new Font("Segoe UI", Font.ITALIC, 13));
         subtitle.setForeground(new Color(255, 193, 7)); // amber
         add(subtitle, "gapbottom 12");
@@ -71,8 +72,8 @@ public class NearMatchReviewOverlay extends RoundedPanel {
         infoBox.setBackground(new Color(50, 55, 65));
         infoBox.setLayout(new MigLayout("insets 12, fillx", "[grow]", ""));
         JLabel infoLabel = new JLabel(
-                "<html>Las siguientes transacciones tienen montos similares pero no idénticos. "
-                        + "Seleccione las que desea conciliar y presione <b>Aprobar Seleccionados</b>.</html>");
+                "<html>Se encontraron posibles coincidencias, incluyendo <b>agrupaciones por referencia</b> (ej: 17013, 17013-1).<br>"
+                        + "Revise los montos sumados y apruebe si corresponden.</html>");
         infoLabel.setFont(new Font("Segoe UI", Font.PLAIN, 12));
         infoLabel.setForeground(new Color(200, 200, 210));
         infoBox.add(infoLabel, "growx");
@@ -81,7 +82,7 @@ public class NearMatchReviewOverlay extends RoundedPanel {
         // Review table
         tableModel = new NearMatchTableModel();
         reviewTable = new JTable(tableModel);
-        reviewTable.setRowHeight(44);
+        reviewTable.setRowHeight(60); // Taller rows for potential groups
         reviewTable.setFont(new Font("Segoe UI", Font.PLAIN, 12));
         reviewTable.setShowGrid(false);
         reviewTable.setIntercellSpacing(new Dimension(0, 1));
@@ -96,10 +97,10 @@ public class NearMatchReviewOverlay extends RoundedPanel {
         // Column widths
         reviewTable.getColumnModel().getColumn(0).setPreferredWidth(35); // ✓
         reviewTable.getColumnModel().getColumn(1).setPreferredWidth(80); // Fecha Libro
-        reviewTable.getColumnModel().getColumn(2).setPreferredWidth(60); // Ref Libro
+        reviewTable.getColumnModel().getColumn(2).setPreferredWidth(80); // Ref Libro
         reviewTable.getColumnModel().getColumn(3).setPreferredWidth(100); // Monto Libro
         reviewTable.getColumnModel().getColumn(4).setPreferredWidth(80); // Fecha Banco
-        reviewTable.getColumnModel().getColumn(5).setPreferredWidth(60); // Ref Banco
+        reviewTable.getColumnModel().getColumn(5).setPreferredWidth(80); // Ref Banco
         reviewTable.getColumnModel().getColumn(6).setPreferredWidth(140); // Desc Banco
         reviewTable.getColumnModel().getColumn(7).setPreferredWidth(100); // Monto Banco
         reviewTable.getColumnModel().getColumn(8).setPreferredWidth(80); // Diferencia
@@ -114,11 +115,28 @@ public class NearMatchReviewOverlay extends RoundedPanel {
                 if (!isSelected) {
                     setForeground(new Color(76, 175, 80));
                 }
+                setVerticalAlignment(SwingConstants.TOP); // Alignment top for multi-line
                 return c;
             }
         };
         reviewTable.getColumnModel().getColumn(3).setCellRenderer(amountRenderer);
         reviewTable.getColumnModel().getColumn(7).setCellRenderer(amountRenderer);
+
+        // Top-align other text columns for better readability of groups
+        DefaultTableCellRenderer topRenderer = new DefaultTableCellRenderer() {
+            @Override
+            public Component getTableCellRendererComponent(JTable table, Object value,
+                    boolean isSelected, boolean hasFocus, int row, int column) {
+                Component c = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
+                setVerticalAlignment(SwingConstants.TOP);
+                return c;
+            }
+        };
+        reviewTable.getColumnModel().getColumn(1).setCellRenderer(topRenderer);
+        reviewTable.getColumnModel().getColumn(2).setCellRenderer(topRenderer);
+        reviewTable.getColumnModel().getColumn(4).setCellRenderer(topRenderer);
+        reviewTable.getColumnModel().getColumn(5).setCellRenderer(topRenderer);
+        reviewTable.getColumnModel().getColumn(6).setCellRenderer(topRenderer);
 
         // Difference renderer (highlighted in amber/red)
         DefaultTableCellRenderer diffRenderer = new DefaultTableCellRenderer() {
@@ -127,6 +145,7 @@ public class NearMatchReviewOverlay extends RoundedPanel {
                     boolean isSelected, boolean hasFocus, int row, int column) {
                 Component c = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
                 setHorizontalAlignment(SwingConstants.CENTER);
+                setVerticalAlignment(SwingConstants.TOP);
                 if (!isSelected) {
                     setForeground(new Color(255, 152, 0)); // amber
                     setFont(getFont().deriveFont(Font.BOLD));
@@ -160,7 +179,7 @@ public class NearMatchReviewOverlay extends RoundedPanel {
         actionRow.add(selectAll);
 
         JButton cancelBtn = createStyledButton("Cancelar", new Color(120, 120, 120));
-        cancelBtn.addActionListener(e -> ModalManager.dismiss(null));
+        cancelBtn.addActionListener(e -> ModalManager.dismiss(onComplete));
         actionRow.add(cancelBtn);
 
         JButton approveBtn = createStyledButton("Aprobar Seleccionados", new Color(46, 125, 50));
@@ -171,17 +190,29 @@ public class NearMatchReviewOverlay extends RoundedPanel {
             for (int i = 0; i < approved.length; i++) {
                 if (approved[i]) {
                     NearMatch nm = nearMatches.get(i);
-                    nm.book().setStatus(Transaction.Status.OPC);
-                    nm.book().setMatchedId(nm.bank().getId());
-                    nm.bank().setStatus(Transaction.Status.OPC);
-                    nm.bank().setMatchedId(nm.book().getId());
+                    // Approve all Book transactions in group
+                    for (Transaction book : nm.books()) {
+                        book.setStatus(Transaction.Status.OPC);
+                        // If 1-to-1, link ID. If Many-to-One, link to the first Bank ID (or -1?)
+                        // Ideally link to the primary bank ID.
+                        if (!nm.banks().isEmpty()) {
+                            book.setMatchedId(nm.banks().get(0).getId());
+                        }
+                    }
+                    // Approve all Bank transactions in group
+                    for (Transaction bank : nm.banks()) {
+                        bank.setStatus(Transaction.Status.OPC);
+                        if (!nm.books().isEmpty()) {
+                            bank.setMatchedId(nm.books().get(0).getId()); // Link to first book
+                        }
+                    }
                     count++;
                 }
             }
             int finalCount = count;
             ModalManager.dismiss(() -> {
                 if (finalCount > 0) {
-                    Toast.show(finalCount + " par(es) conciliado(s) ✓", Toast.Type.SUCCESS);
+                    Toast.show(finalCount + " grupo(s) conciliado(s) ✓", Toast.Type.SUCCESS);
                 }
                 if (onComplete != null)
                     onComplete.run();
@@ -228,20 +259,48 @@ public class NearMatchReviewOverlay extends RoundedPanel {
         @Override
         public Object getValueAt(int row, int col) {
             NearMatch nm = nearMatches.get(row);
-            Transaction book = nm.book();
-            Transaction bank = nm.bank();
+            List<Transaction> books = nm.books();
+            List<Transaction> banks = nm.banks();
+
             return switch (col) {
                 case 0 -> approved[row];
-                case 1 -> book.getDate().toString();
-                case 2 -> book.getReference();
-                case 3 -> "Bs. " + FMT.format(book.getAbsAmount());
-                case 4 -> bank.getDate().toString();
-                case 5 -> bank.getReference();
-                case 6 -> truncate(bank.getDescription(), 30);
-                case 7 -> "Bs. " + FMT.format(bank.getAbsAmount());
-                case 8 -> "Δ Bs. " + nm.differenceFormatted();
+
+                // BOOK SIDE
+                case 1 -> formatList(books, t -> t.getDate().toString());
+                case 2 -> formatList(books, Transaction::getReference);
+                case 3 -> formatAmounts(books);
+
+                // BANK SIDE
+                case 4 -> formatList(banks, t -> t.getDate().toString());
+                case 5 -> formatList(banks, Transaction::getReference);
+                case 6 -> truncate(formatList(banks, Transaction::getDescription), 40);
+                case 7 -> formatAmounts(banks);
+
+                case 8 -> "<html><br>" + "Δ Bs. " + nm.differenceFormatted() + "</html>";
                 default -> "";
             };
+        }
+
+        private String formatList(List<Transaction> list, java.util.function.Function<Transaction, String> mapper) {
+            if (list == null || list.isEmpty())
+                return "";
+            return "<html>" + list.stream()
+                    .map(mapper)
+                    .collect(Collectors.joining("<br>")) + "</html>";
+        }
+
+        private String formatAmounts(List<Transaction> list) {
+            if (list == null || list.isEmpty())
+                return "";
+            String detail = list.stream()
+                    .map(t -> "Bs. " + FMT.format(t.getAbsAmount()))
+                    .collect(Collectors.joining("<br>"));
+
+            if (list.size() > 1) {
+                double total = list.stream().mapToDouble(Transaction::getAbsAmount).sum();
+                detail += "<br><b>Total: Bs. " + FMT.format(total) + "</b>";
+            }
+            return "<html>" + detail + "</html>";
         }
 
         @Override
@@ -258,7 +317,9 @@ public class NearMatchReviewOverlay extends RoundedPanel {
     private static String truncate(String s, int maxLen) {
         if (s == null)
             return "";
-        return s.length() > maxLen ? s.substring(0, maxLen) + "..." : s;
+        // Simple truncation for HTML content is risky, but assuming simple text
+        String text = s.replace("<html>", "").replace("</html>", "").replace("<br>", " | ");
+        return text.length() > maxLen ? text.substring(0, maxLen) + "..." : text;
     }
 
     private JButton createCloseButton() {
@@ -284,7 +345,7 @@ public class NearMatchReviewOverlay extends RoundedPanel {
         btn.setBorderPainted(false);
         btn.setFocusPainted(false);
         btn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        btn.addActionListener(e -> ModalManager.dismiss(null));
+        btn.addActionListener(e -> ModalManager.dismiss(onComplete));
         return btn;
     }
 
@@ -308,7 +369,7 @@ public class NearMatchReviewOverlay extends RoundedPanel {
             }
         };
         btn.setFont(new Font("Segoe UI", Font.BOLD, 12));
-        btn.setPreferredSize(new Dimension(140, 36));
+        btn.setPreferredSize(new Dimension(180, 36));
         btn.setContentAreaFilled(false);
         btn.setBorderPainted(false);
         btn.setFocusPainted(false);

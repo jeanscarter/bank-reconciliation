@@ -100,7 +100,8 @@ public class MainFrame extends JFrame {
         reconcView.add(saldoBanner, "growx, h 36!");
 
         // Main reconciliation area
-        ReconciliationPanel reconcPanel = new ReconciliationPanel(bookTransactions, bankTransactions, summaryPanel);
+        ReconciliationPanel reconcPanel = new ReconciliationPanel(bookTransactions, bankTransactions, summaryPanel,
+                saldoInicial);
         reconcView.add(reconcPanel, "grow");
 
         // Footer

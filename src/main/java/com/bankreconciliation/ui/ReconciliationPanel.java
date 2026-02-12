@@ -21,24 +21,33 @@ public class ReconciliationPanel extends JPanel {
     private final List<Transaction> bookTransactions;
     private final List<Transaction> bankTransactions;
     private final BalanceSummaryPanel summaryPanel;
+    private final double saldoInicial;
 
     private TransactionTableModel bookModel;
     private TransactionTableModel bankModel;
     private List<NearMatch> pendingNearMatches;
 
+    private RecurringChargesPanel recurringChargesPanel;
+
     public ReconciliationPanel(List<Transaction> bookTransactions,
             List<Transaction> bankTransactions,
-            BalanceSummaryPanel summaryPanel) {
+            BalanceSummaryPanel summaryPanel,
+            double saldoInicial) {
         this.bookTransactions = bookTransactions;
         this.bankTransactions = bankTransactions;
         this.summaryPanel = summaryPanel;
+        this.saldoInicial = saldoInicial;
 
         setOpaque(false);
-        setLayout(new MigLayout("insets 0, gap 16, fillx, filly", "[grow, 50%][grow, 50%]", "[][grow]"));
+        setLayout(new MigLayout("insets 0, gap 16, fillx, filly", "[grow, 50%][grow, 50%]", "[][][grow]"));
 
         // ── Auto-reconciliation header ──
         JPanel topBar = buildTopBar();
         add(topBar, "span 2, growx, wrap");
+
+        // ── Recurring Charges Widget ──
+        recurringChargesPanel = new RecurringChargesPanel();
+        add(recurringChargesPanel, "span 2, growx, wrap");
 
         JPanel bookPanel = createTablePanel("📘  Libro Contable", bookTransactions, Transaction.Source.BOOK,
                 new String[] { "Fecha", "Ref", "Descripción", "Debe", "Haber", "Estado" });
@@ -63,6 +72,20 @@ public class ReconciliationPanel extends JPanel {
         autoLabel.setForeground(new Color(160, 160, 170));
         bar.add(autoLabel, "gapright 12");
 
+        // Report Button
+        JButton reportBtn = new JButton("📄 Reporte");
+        reportBtn.setFont(new Font("Segoe UI", Font.PLAIN, 12));
+        reportBtn.setForeground(Color.WHITE);
+        reportBtn.setContentAreaFilled(false);
+        reportBtn.setBorderPainted(false);
+        reportBtn.setFocusPainted(false);
+        reportBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        reportBtn.addActionListener(e -> {
+            ReportOverlay overlay = new ReportOverlay(bookTransactions, bankTransactions, saldoInicial);
+            ModalManager.show(overlay);
+        });
+        bar.add(reportBtn);
+
         JButton reviewBtn = new JButton("🔍 Revisar Diferencias");
         reviewBtn.setFont(new Font("Segoe UI", Font.PLAIN, 12));
         reviewBtn.setForeground(new Color(255, 193, 7));
@@ -73,26 +96,66 @@ public class ReconciliationPanel extends JPanel {
         reviewBtn.addActionListener(e -> openNearMatchReview());
         bar.add(reviewBtn);
 
+        JButton largeDiffBtn = new JButton("⚠️ Diferencias Mayores");
+        largeDiffBtn.setFont(new Font("Segoe UI", Font.PLAIN, 12));
+        largeDiffBtn.setForeground(new Color(255, 100, 100)); // Red-ish
+        largeDiffBtn.setContentAreaFilled(false);
+        largeDiffBtn.setBorderPainted(false);
+        largeDiffBtn.setFocusPainted(false);
+        largeDiffBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        largeDiffBtn.addActionListener(e -> openLargeDiffReview());
+        bar.add(largeDiffBtn);
+
         return bar;
+    }
+
+    private void openLargeDiffReview() {
+        // Find large differences
+        List<NearMatch> largeDiffs = ReconciliationEngine.findLargeDifferences(bookTransactions, bankTransactions);
+
+        if (largeDiffs.isEmpty()) {
+            Toast.show("No se encontraron diferencias mayores a 1.00", Toast.Type.INFO);
+            return;
+        }
+
+        LargeDifferenceReviewOverlay overlay = new LargeDifferenceReviewOverlay(largeDiffs);
+        ModalManager.show(overlay);
     }
 
     // ======================== Auto-Reconciliation ========================
 
     private void runAutoReconciliation() {
-        ReconciliationEngine.Result result = ReconciliationEngine.autoReconcile(
+        // Step 1: Perform exact matching (Ref+Amount, Amount-only)
+        // This does NOT assign unmatched statuses (DNA/RNE/etc) yet.
+        ReconciliationEngine.Result result = ReconciliationEngine.performExactMatch(
                 bookTransactions, bankTransactions);
 
-        System.out.println(result.summary());
+        System.out.println("Fase 1 (Exacta): " + result.totalMatched() + " conciliadas.");
         refreshAll();
 
-        // Find near-matches and show review overlay if any exist
+        // Step 2: Find near-matches (Same Ref + diff amount, or similar amount)
         pendingNearMatches = ReconciliationEngine.findNearMatches(
                 bookTransactions, bankTransactions);
 
         if (!pendingNearMatches.isEmpty()) {
-            // Show overlay on next EDT tick (after tables are painted)
-            SwingUtilities.invokeLater(this::openNearMatchReview);
+            // Show overlay. On close, proceed to Step 3.
+            SwingUtilities.invokeLater(() -> {
+                Toast.show("Se encontraron " + pendingNearMatches.size() + " posibles coincidencias.", Toast.Type.INFO);
+                openNearMatchReview();
+            });
+        } else {
+            // No near matches -> proceed immediately to Step 3
+            finalizeReconciliation();
         }
+    }
+
+    private void finalizeReconciliation() {
+        // Step 3: Assign statuses to remaining PENDING transactions
+        ReconciliationEngine.Result result = ReconciliationEngine.assignUnmatchedStatuses(
+                bookTransactions, bankTransactions);
+
+        System.out.println("Fase 3 (Final): " + result.unmatched() + " asignadas como no conciliadas.");
+        refreshAll();
     }
 
     private void openNearMatchReview() {
@@ -100,8 +163,12 @@ public class ReconciliationPanel extends JPanel {
             Toast.show("No hay coincidencias aproximadas pendientes", Toast.Type.INFO);
             return;
         }
+
+        // When overlay closes (after user approves some), finalizes the process
         NearMatchReviewOverlay overlay = new NearMatchReviewOverlay(
-                pendingNearMatches, this::refreshAll);
+                pendingNearMatches, () -> {
+                    finalizeReconciliation();
+                });
         ModalManager.show(overlay);
     }
 
@@ -227,6 +294,13 @@ public class ReconciliationPanel extends JPanel {
             bankModel.fireTableDataChanged();
         if (summaryPanel != null)
             summaryPanel.recalculate();
+        if (recurringChargesPanel != null) {
+            // Filter only CNR transactions from bank side
+            List<Transaction> cnrList = bankTransactions.stream()
+                    .filter(t -> t.getStatus() == Transaction.Status.CNR)
+                    .toList();
+            recurringChargesPanel.update(cnrList);
+        }
     }
 
     // ======================== Table Model ========================
@@ -282,6 +356,62 @@ public class ReconciliationPanel extends JPanel {
                 case 5 -> t.getStatus();
                 default -> "";
             };
+        }
+    }
+
+    // ======================== Recurring Charges Widget ========================
+
+    private static class RecurringChargesPanel extends RoundedPanel {
+        private final java.util.Map<String, JLabel> valueLabels = new java.util.HashMap<>();
+        private static final java.text.DecimalFormat FMT = new java.text.DecimalFormat("#,##0.00");
+
+        public RecurringChargesPanel() {
+            super(15);
+            setBackground(new Color(45, 50, 60));
+            setLayout(new MigLayout("insets 10 20 10 20, fillx", "[]20[]20[]20[]20[]", "[]"));
+
+            addWidget("COMISIONES");
+            addWidget("MANTENIMIENTO");
+            addWidget("ITF");
+            addWidget("IVA");
+            addWidget("CHEQUERA");
+        }
+
+        private void addWidget(String title) {
+            JPanel p = new JPanel(new MigLayout("insets 0", "[]10[]", "[]"));
+            p.setOpaque(false);
+
+            JLabel titleLbl = new JLabel(title);
+            titleLbl.setFont(new Font("Segoe UI", Font.BOLD, 12));
+            titleLbl.setForeground(new Color(160, 160, 170));
+
+            JLabel valueLbl = new JLabel("0.00");
+            valueLbl.setFont(new Font("Segoe UI", Font.BOLD, 14));
+            valueLbl.setForeground(new Color(255, 100, 100)); // Red-ish for charges
+
+            p.add(titleLbl);
+            p.add(valueLbl);
+
+            add(p);
+            valueLabels.put(title, valueLbl);
+        }
+
+        public void update(List<Transaction> transactions) {
+            java.util.Map<String, Double> totals = com.bankreconciliation.util.RecurringChargesCalculator
+                    .calculate(transactions);
+
+            totals.forEach((key, val) -> {
+                JLabel lbl = valueLabels.get(key);
+                if (lbl != null) {
+                    lbl.setText(FMT.format(val));
+                    // Highlight if > 0
+                    if (val > 0) {
+                        lbl.setForeground(new Color(255, 100, 100));
+                    } else {
+                        lbl.setForeground(new Color(100, 100, 110));
+                    }
+                }
+            });
         }
     }
 }
