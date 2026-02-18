@@ -35,7 +35,7 @@ public class FileUploadPanel extends JPanel {
     private static final Color BORDER_DASHED = new Color(80, 90, 110);
     private static final Color TEXT_MUTED = new Color(130, 140, 160);
     private static final Color TEXT_WHITE = Color.WHITE;
-    private static final NumberFormat CURRENCY_FMT = NumberFormat.getNumberInstance(new Locale("es", "VE"));
+    private static final NumberFormat CURRENCY_FMT = NumberFormat.getNumberInstance(Locale.of("es", "VE"));
 
     static {
         CURRENCY_FMT.setMinimumFractionDigits(2);
@@ -49,8 +49,7 @@ public class FileUploadPanel extends JPanel {
     private JLabel bookStatusLabel;
     private JLabel bankStatusLabel;
     private JTextField saldoInicialField;
-    private JTable bookPreviewTable;
-    private JTable bankPreviewTable;
+
     private PreviewTableModel bookPreviewModel;
     private PreviewTableModel bankPreviewModel;
     private JButton continueButton;
@@ -60,7 +59,6 @@ public class FileUploadPanel extends JPanel {
     private DropZonePanel bankDropZone;
 
     private final BiConsumer<List<Transaction>, List<Transaction>> onContinue;
-    private final Runnable onSaldoInicialChanged;
 
     /**
      * @param onContinue callback receiving (bookTxns, bankTxns) when user clicks
@@ -68,7 +66,7 @@ public class FileUploadPanel extends JPanel {
      */
     public FileUploadPanel(BiConsumer<List<Transaction>, List<Transaction>> onContinue) {
         this.onContinue = onContinue;
-        this.onSaldoInicialChanged = null;
+
         buildUI();
     }
 
@@ -243,11 +241,6 @@ public class FileUploadPanel extends JPanel {
         previewTable.getColumnModel().getColumn(3).setPreferredWidth(100);
         previewTable.getColumnModel().getColumn(4).setPreferredWidth(100);
 
-        if (source == Transaction.Source.BOOK)
-            bookPreviewTable = previewTable;
-        else
-            bankPreviewTable = previewTable;
-
         JScrollPane scroll = new JScrollPane(previewTable);
         scroll.setBorder(BorderFactory.createEmptyBorder());
         scroll.getViewport().setBackground(PANEL_BG);
@@ -264,13 +257,13 @@ public class FileUploadPanel extends JPanel {
      */
     private class DropZonePanel extends RoundedPanel {
         private final Color accent;
-        private final Transaction.Source source;
+
         private boolean hovering = false;
 
         DropZonePanel(Color accent, Transaction.Source source) {
             super(16, false);
             this.accent = accent;
-            this.source = source;
+            // this.source = source; // removed unused field assignment
             setBackground(new Color(35, 39, 46));
             setLayout(new MigLayout("insets 40, fill, wrap, al center center", "[center]", "[center]"));
             setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));

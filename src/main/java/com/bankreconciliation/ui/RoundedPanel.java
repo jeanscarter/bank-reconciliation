@@ -7,7 +7,7 @@ import java.awt.geom.RoundRectangle2D;
 public class RoundedPanel extends JPanel {
 
     private final int arc;
-    private final Color shadowColor;
+
     private final boolean drawShadow;
 
     public RoundedPanel(int arc) {
@@ -17,7 +17,7 @@ public class RoundedPanel extends JPanel {
     public RoundedPanel(int arc, boolean drawShadow) {
         this.arc = arc;
         this.drawShadow = drawShadow;
-        this.shadowColor = new Color(0, 0, 0, 30);
+
         setOpaque(false);
     }
 

@@ -20,13 +20,10 @@ public class BadgeRenderer extends DefaultTableCellRenderer {
 
     private static class BadgeComponent extends JPanel {
         private final Transaction.Status status;
-        private final boolean selected;
-        private final JTable table;
 
         BadgeComponent(Transaction.Status status, boolean selected, JTable table) {
             this.status = status;
-            this.selected = selected;
-            this.table = table;
+
             setOpaque(true);
             setBackground(selected ? table.getSelectionBackground() : table.getBackground());
         }

@@ -27,8 +27,6 @@ public class BncProfitLedgerProcessor implements FileParser {
     // Regex for Transaction lines
     // Match lines ending with 3 amounts (Debe, Haber, IGTF)
     // 0000017835 ... 1,967.18 0.00 0.00
-    private static final Pattern TRANSACTION_PATTERN = Pattern.compile(
-            "^(\\d+)\\s+\\d+\\s+\\w+\\s+(\\w+)\\s+([\\w.-]+)\\s+(\\w+)\\s+(.+?)\\s+([\\d.,]+)\\s+([\\d.,]+)\\s+([\\d.,]+)$");
 
     @Override
     public List<Transaction> parse(File file, Transaction.Source source) throws Exception {
@@ -88,7 +86,6 @@ public class BncProfitLedgerProcessor implements FileParser {
             // Check if last 3 are amounts
             String debeStr = tokens[tokens.length - 3];
             String haberStr = tokens[tokens.length - 2];
-            String igtfStr = tokens[tokens.length - 1];
 
             // Verify they look like numbers
             if (!isNumber(debeStr) || !isNumber(haberStr))

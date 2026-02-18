@@ -6,8 +6,7 @@ import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
 
 import java.io.File;
-import java.io.IOException;
-import java.math.BigDecimal;
+
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -87,7 +86,6 @@ public class BncBankStatementProcessor implements FileParser {
                 // Token[N-3]: Debe
                 // Token[N-4]: Reference
 
-                String saldoStr = tokens[tokens.length - 1];
                 String haberStr = tokens[tokens.length - 2];
                 String debeStr = tokens[tokens.length - 3];
                 String refStr = tokens[tokens.length - 4];
@@ -135,17 +133,6 @@ public class BncBankStatementProcessor implements FileParser {
 
     private boolean isAmount(String s) {
         return s.matches("[+-]?[\\d.,]+");
-    }
-
-    private boolean isDebit(String description) {
-        String upper = description.toUpperCase();
-        return upper.contains("RETIRO") ||
-                upper.contains("COMISION") ||
-                upper.contains("IMPUESTO") ||
-                upper.contains("CHEQUE") ||
-                upper.contains("DEBITO") ||
-                upper.contains("COMPRA") ||
-                upper.contains("PAGO");
     }
 
     private double parseAmountInternal(String token) {
