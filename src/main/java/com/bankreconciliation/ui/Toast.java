@@ -11,10 +11,10 @@ import java.util.List;
 public class Toast extends JPanel {
 
     public enum Type {
-        SUCCESS(new Color(46, 125, 50), new Color(200, 230, 201), "✓"),
-        ERROR(new Color(198, 40, 40), new Color(255, 205, 210), "✗"),
-        INFO(new Color(21, 101, 192), new Color(187, 222, 251), "ℹ"),
-        WARNING(new Color(245, 124, 0), new Color(255, 224, 178), "⚠");
+        SUCCESS(new Color(46, 125, 50), new Color(200, 230, 201), "(v)"),
+        ERROR(new Color(198, 40, 40), new Color(255, 205, 210), "(x)"),
+        INFO(new Color(21, 101, 192), new Color(187, 222, 251), "(i)"),
+        WARNING(new Color(245, 124, 0), new Color(255, 224, 178), "(!)");
 
         final Color bg;
         final Color fg;
@@ -143,7 +143,7 @@ public class Toast extends JPanel {
 
         // Icon
         g2.setColor(Color.WHITE);
-        g2.setFont(new Font("Segoe UI Emoji", Font.PLAIN, 18));
+        g2.setFont(new Font("Segoe UI", Font.BOLD, 18));
         g2.drawString(type.icon, 16, 33);
 
         // Text

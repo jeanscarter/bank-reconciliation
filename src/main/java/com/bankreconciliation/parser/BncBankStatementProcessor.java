@@ -247,4 +247,9 @@ public class BncBankStatementProcessor implements FileParser {
             return false;
         }
     }
+
+    @Override
+    public String getBankName() {
+        return "BNC";
+    }
 }

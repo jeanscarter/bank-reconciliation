@@ -22,6 +22,7 @@ public class ReconciliationPanel extends JPanel {
     private final List<Transaction> bankTransactions;
     private final BalanceSummaryPanel summaryPanel;
     private final double saldoInicial;
+    private final String bankName;
 
     private TransactionTableModel bookModel;
     private TransactionTableModel bankModel;
@@ -32,11 +33,13 @@ public class ReconciliationPanel extends JPanel {
     public ReconciliationPanel(List<Transaction> bookTransactions,
             List<Transaction> bankTransactions,
             BalanceSummaryPanel summaryPanel,
-            double saldoInicial) {
+            double saldoInicial,
+            String bankName) {
         this.bookTransactions = bookTransactions;
         this.bankTransactions = bankTransactions;
         this.summaryPanel = summaryPanel;
         this.saldoInicial = saldoInicial;
+        this.bankName = bankName;
 
         setOpaque(false);
         setLayout(new MigLayout("insets 0, gap 16, fillx, filly", "[grow, 50%][grow, 50%]", "[][][grow]"));
@@ -49,9 +52,9 @@ public class ReconciliationPanel extends JPanel {
         recurringChargesPanel = new RecurringChargesPanel();
         add(recurringChargesPanel, "span 2, growx, wrap");
 
-        JPanel bookPanel = createTablePanel("📘  Libro Contable", bookTransactions, Transaction.Source.BOOK,
+        JPanel bookPanel = createTablePanel("Libro Contable", bookTransactions, Transaction.Source.BOOK,
                 new String[] { "Fecha", "Ref", "Descripción", "Debe", "Haber", "Estado" });
-        JPanel bankPanel = createTablePanel("🏦  Estado de Cuenta Bancario", bankTransactions, Transaction.Source.BANK,
+        JPanel bankPanel = createTablePanel("Estado de Cuenta Bancario", bankTransactions, Transaction.Source.BANK,
                 new String[] { "Fecha", "Ref", "Descripción", "Depósito", "Retiro", "Estado" });
 
         add(bookPanel, "grow");
@@ -73,7 +76,7 @@ public class ReconciliationPanel extends JPanel {
         bar.add(autoLabel, "gapright 12");
 
         // Report Button
-        JButton reportBtn = new JButton("📄 Reporte");
+        JButton reportBtn = new JButton("Reporte");
         reportBtn.setFont(new Font("Segoe UI", Font.PLAIN, 12));
         reportBtn.setForeground(Color.WHITE);
         reportBtn.setContentAreaFilled(false);
@@ -81,12 +84,12 @@ public class ReconciliationPanel extends JPanel {
         reportBtn.setFocusPainted(false);
         reportBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         reportBtn.addActionListener(e -> {
-            ReportOverlay overlay = new ReportOverlay(bookTransactions, bankTransactions, saldoInicial);
+            ReportOverlay overlay = new ReportOverlay(bookTransactions, bankTransactions, saldoInicial, bankName);
             ModalManager.show(overlay);
         });
         bar.add(reportBtn);
 
-        JButton reviewBtn = new JButton("🔍 Revisar Diferencias");
+        JButton reviewBtn = new JButton("Revisar Diferencias");
         reviewBtn.setFont(new Font("Segoe UI", Font.PLAIN, 12));
         reviewBtn.setForeground(new Color(255, 193, 7));
         reviewBtn.setContentAreaFilled(false);
@@ -96,7 +99,7 @@ public class ReconciliationPanel extends JPanel {
         reviewBtn.addActionListener(e -> openNearMatchReview());
         bar.add(reviewBtn);
 
-        JButton largeDiffBtn = new JButton("⚠️ Diferencias Mayores");
+        JButton largeDiffBtn = new JButton("Diferencias Mayores");
         largeDiffBtn.setFont(new Font("Segoe UI", Font.PLAIN, 12));
         largeDiffBtn.setForeground(new Color(255, 100, 100)); // Red-ish
         largeDiffBtn.setContentAreaFilled(false);
@@ -106,7 +109,39 @@ public class ReconciliationPanel extends JPanel {
         largeDiffBtn.addActionListener(e -> openLargeDiffReview());
         bar.add(largeDiffBtn);
 
+        JButton opcBtn = new JButton("Exportar OPC");
+        opcBtn.setFont(new Font("Segoe UI", Font.PLAIN, 12));
+        opcBtn.setForeground(new Color(100, 200, 100)); // Green-ish
+        opcBtn.setContentAreaFilled(false);
+        opcBtn.setBorderPainted(false);
+        opcBtn.setFocusPainted(false);
+        opcBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        opcBtn.addActionListener(e -> exportOpcProcesses());
+        bar.add(opcBtn);
+
         return bar;
+    }
+
+    private void exportOpcProcesses() {
+        JFileChooser fileChooser = new JFileChooser();
+        fileChooser.setDialogTitle("Guardar Reporte OPC");
+        fileChooser.setFileFilter(
+                new javax.swing.filechooser.FileNameExtensionFilter("Archivos Excel (*.xlsx)", "xlsx"));
+        fileChooser.setSelectedFile(new java.io.File("Procesos_OPC_" + bankName + ".xlsx"));
+
+        if (fileChooser.showSaveDialog(this) == JFileChooser.APPROVE_OPTION) {
+            java.io.File file = fileChooser.getSelectedFile();
+            if (!file.getName().toLowerCase().endsWith(".xlsx")) {
+                file = new java.io.File(file.getParentFile(), file.getName() + ".xlsx");
+            }
+
+            try {
+                com.bankreconciliation.report.OpcExcelExporter.export(bookTransactions, bankTransactions, bankName, file.getAbsolutePath());
+                Toast.show("Reporte OPC exportado exitosamente", Toast.Type.SUCCESS);
+            } catch (Exception ex) {
+                Toast.show("Error al exportar OPC: " + ex.getMessage(), Toast.Type.ERROR);
+            }
+        }
     }
 
     private void openLargeDiffReview() {

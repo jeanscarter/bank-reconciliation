@@ -19,7 +19,6 @@ import java.text.NumberFormat;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.util.function.BiConsumer;
 
 /**
  * Full-screen upload view with two sections for Libro Contable and Estado de
@@ -27,6 +26,14 @@ import java.util.function.BiConsumer;
  * Files can be uploaded via buttons or drag-and-drop.
  */
 public class FileUploadPanel extends JPanel {
+
+    /**
+     * Interface for upload completion callback
+     */
+    @FunctionalInterface
+    public interface UploadCallback {
+        void onContinue(List<Transaction> bookTxns, List<Transaction> bankTxns, String bankName);
+    }
 
     private static final Color PANEL_BG = new Color(40, 44, 52);
     private static final Color ROOT_BG = new Color(30, 33, 40);
@@ -45,6 +52,8 @@ public class FileUploadPanel extends JPanel {
     private List<Transaction> bookTransactions = new ArrayList<>();
     private List<Transaction> bankTransactions = new ArrayList<>();
     private double saldoInicial = 0.0;
+    private String bookBankName = "Desconocido";
+    private String bankBankName = "Desconocido";
 
     private JLabel bookStatusLabel;
     private JLabel bankStatusLabel;
@@ -58,13 +67,13 @@ public class FileUploadPanel extends JPanel {
     private DropZonePanel bookDropZone;
     private DropZonePanel bankDropZone;
 
-    private final BiConsumer<List<Transaction>, List<Transaction>> onContinue;
+    private final UploadCallback onContinue;
 
     /**
-     * @param onContinue callback receiving (bookTxns, bankTxns) when user clicks
+     * @param onContinue callback receiving (bookTxns, bankTxns, bankName) when user clicks
      *                   Continue
      */
-    public FileUploadPanel(BiConsumer<List<Transaction>, List<Transaction>> onContinue) {
+    public FileUploadPanel(UploadCallback onContinue) {
         this.onContinue = onContinue;
 
         buildUI();
@@ -105,8 +114,8 @@ public class FileUploadPanel extends JPanel {
                 "[grow, 50%][grow, 50%]", "[grow]"));
         uploadArea.setOpaque(false);
 
-        uploadArea.add(createUploadSection("📘  Libro Contable", Transaction.Source.BOOK, ACCENT_BLUE), "grow");
-        uploadArea.add(createUploadSection("🏦  Estado de Cuenta Bancario", Transaction.Source.BANK, ACCENT_GREEN),
+        uploadArea.add(createUploadSection("Libro Contable", Transaction.Source.BOOK, ACCENT_BLUE), "grow");
+        uploadArea.add(createUploadSection("Estado de Cuenta Bancario", Transaction.Source.BANK, ACCENT_GREEN),
                 "grow");
 
         add(uploadArea, "grow");
@@ -120,12 +129,60 @@ public class FileUploadPanel extends JPanel {
         continueButton.setPreferredSize(new Dimension(280, 48));
         continueButton.addActionListener(e -> {
             if (!bookTransactions.isEmpty() && !bankTransactions.isEmpty()) {
-                onContinue.accept(bookTransactions, bankTransactions);
+                if (!validateUpload()) return;
+                String finalBank = bookBankName.equals("Desconocido") ? bankBankName : bookBankName;
+                onContinue.onContinue(bookTransactions, bankTransactions, finalBank);
             }
         });
         bottomBar.add(continueButton);
 
         add(bottomBar, "growx");
+    }
+
+    private boolean validateUpload() {
+        if (!bookBankName.equals("Desconocido") && !bankBankName.equals("Desconocido") && !bookBankName.equals(bankBankName)) {
+            JOptionPane.showMessageDialog(this, 
+                "Los bancos detectados no coinciden.\n" +
+                "Libro: " + bookBankName + "\n" +
+                "Estado de Cuenta: " + bankBankName, 
+                "Error de Validación de Banco", JOptionPane.ERROR_MESSAGE);
+            return false;
+        }
+
+        int bookMonth = getMostFrequentMonth(bookTransactions);
+        int bankMonth = getMostFrequentMonth(bankTransactions);
+
+        if (bookMonth != -1 && bankMonth != -1 && bookMonth != bankMonth) {
+            int result = JOptionPane.showConfirmDialog(this, 
+                "Los meses de las transacciones no coinciden.\n" +
+                "Libro: Mes " + bookMonth + "\n" +
+                "Estado de Cuenta: Mes " + bankMonth + "\n\n" +
+                "¿Desea continuar de todos modos?", 
+                "Advertencia de Mes", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+            if (result != JOptionPane.YES_OPTION) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private int getMostFrequentMonth(List<Transaction> txns) {
+        if (txns.isEmpty()) return -1;
+        int[] counts = new int[13];
+        for (Transaction t : txns) {
+            if (t.getDate() != null) {
+                counts[t.getDate().getMonthValue()]++;
+            }
+        }
+        int max = 0;
+        int maxMonth = -1;
+        for (int i = 1; i <= 12; i++) {
+            if (counts[i] > max) {
+                max = counts[i];
+                maxMonth = i;
+            }
+        }
+        return maxMonth;
     }
 
     private JPanel createUploadSection(String title, Transaction.Source source, Color accent) {
@@ -366,11 +423,13 @@ public class FileUploadPanel extends JPanel {
             List<Transaction> parsed = new ArrayList<>();
             double extractedSaldo = 0;
             String errorMsg = null;
+            String detectedBank = "Desconocido";
 
             @Override
             protected Void doInBackground() {
                 try {
                     FileParser parser = ParserFactory.getParser(file);
+                    detectedBank = parser.getBankName();
                     parsed = parser.parse(file, source);
                     if (source == Transaction.Source.BANK) {
                         extractedSaldo = parser.extractSaldoInicial(file);
@@ -415,6 +474,7 @@ public class FileUploadPanel extends JPanel {
 
                 if (source == Transaction.Source.BOOK) {
                     bookTransactions = parsed;
+                    bookBankName = detectedBank;
                     bookStatusLabel.setText("✓ " + file.getName() + " — " + parsed.size() + " transacciones");
                     bookStatusLabel.setForeground(ACCENT_BLUE);
                     bookPreviewModel.setTransactions(parsed);
@@ -422,6 +482,7 @@ public class FileUploadPanel extends JPanel {
                     Toast.show("Libro Contable cargado: " + parsed.size() + " registros", Toast.Type.SUCCESS);
                 } else {
                     bankTransactions = parsed;
+                    bankBankName = detectedBank;
                     bankStatusLabel.setText("✓ " + file.getName() + " — " + parsed.size() + " transacciones");
                     bankStatusLabel.setForeground(ACCENT_GREEN);
                     bankPreviewModel.setTransactions(parsed);

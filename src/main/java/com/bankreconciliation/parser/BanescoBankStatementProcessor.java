@@ -171,4 +171,9 @@ public class BanescoBankStatementProcessor implements FileParser {
             return false;
         }
     }
+
+    @Override
+    public String getBankName() {
+        return "Banesco";
+    }
 }

@@ -37,8 +37,8 @@ public class MainFrame extends JFrame {
 
         // Phase 1: Upload view
         final FileUploadPanel[] uploadRef = new FileUploadPanel[1];
-        FileUploadPanel uploadPanel = new FileUploadPanel((bookTxns, bankTxns) -> {
-            showReconciliation(bookTxns, bankTxns, uploadRef[0].getSaldoInicial());
+        FileUploadPanel uploadPanel = new FileUploadPanel((bookTxns, bankTxns, bankName) -> {
+            showReconciliation(bookTxns, bankTxns, uploadRef[0].getSaldoInicial(), bankName);
         });
         uploadRef[0] = uploadPanel;
         rootPanel.add(uploadPanel, "UPLOAD");
@@ -54,7 +54,8 @@ public class MainFrame extends JFrame {
 
     public void showReconciliation(List<Transaction> bookTransactions,
             List<Transaction> bankTransactions,
-            double saldoInicial) {
+            double saldoInicial,
+            String bankName) {
         // Build reconciliation view
         JPanel reconcView = new JPanel(new MigLayout("insets 24, fill, wrap, gap 0 20",
                 "[grow]", "[][][][grow][]"));
@@ -69,10 +70,21 @@ public class MainFrame extends JFrame {
         appTitle.setForeground(Color.WHITE);
         titleBar.add(appTitle);
 
-        JLabel subtitle = new JLabel("Sistema de Conciliación Automática");
+        JLabel subtitle = new JLabel("Sistema de Conciliación Automática" + (bankName.equals("Desconocido") ? "" : " - " + bankName));
         subtitle.setFont(new Font("Segoe UI", Font.PLAIN, 13));
         subtitle.setForeground(new Color(130, 140, 160));
         titleBar.add(subtitle);
+
+        // Leyenda button
+        JButton leyendaBtn = new JButton("Leyenda");
+        leyendaBtn.setFont(new Font("Segoe UI", Font.BOLD, 12));
+        leyendaBtn.setForeground(new Color(200, 200, 200));
+        leyendaBtn.setContentAreaFilled(false);
+        leyendaBtn.setBorderPainted(false);
+        leyendaBtn.setFocusPainted(false);
+        leyendaBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        leyendaBtn.addActionListener(e -> showLeyendaModal());
+        titleBar.add(leyendaBtn);
 
         // Back button
         JButton backBtn = new JButton("← Cargar nuevos archivos");
@@ -101,7 +113,7 @@ public class MainFrame extends JFrame {
 
         // Main reconciliation area
         ReconciliationPanel reconcPanel = new ReconciliationPanel(bookTransactions, bankTransactions, summaryPanel,
-                saldoInicial);
+                saldoInicial, bankName);
         reconcView.add(reconcPanel, "grow");
 
         // Footer
@@ -128,5 +140,47 @@ public class MainFrame extends JFrame {
         banner.add(label);
 
         return banner;
+    }
+
+    private void showLeyendaModal() {
+        JPanel panel = new JPanel(new MigLayout("wrap, insets 20", "[grow]", "[]10[]"));
+        panel.setBackground(ROOT_BG);
+
+        JLabel title = new JLabel("Leyenda de Operaciones");
+        title.setFont(new Font("Segoe UI", Font.BOLD, 18));
+        title.setForeground(Color.WHITE);
+        panel.add(title, "growx");
+
+        panel.add(createLeyendaItem("(-) DNA", "Depósito no abonado en cuenta bancaria", Transaction.Status.DNA.getColor()), "growx");
+        panel.add(createLeyendaItem("(+) RNE", "Retiro no efectuado en CB o cheque no cobrado", Transaction.Status.RNE.getColor()), "growx");
+        panel.add(createLeyendaItem("(+) ANR", "Abono en CB no registrado en Libro Bancos", Transaction.Status.ANR.getColor()), "growx");
+        panel.add(createLeyendaItem("(-) CNR", "Cargo en CB no registrado en Libro Bancos", Transaction.Status.CNR.getColor()), "growx");
+        panel.add(createLeyendaItem("OPC", "Operación Conciliada Perfectamente", Transaction.Status.OPC.getColor()), "growx");
+
+        JButton closeBtn = new JButton("Cerrar");
+        closeBtn.addActionListener(e -> ModalManager.dismiss(null));
+        closeBtn.setBackground(new Color(50, 55, 65));
+        closeBtn.setForeground(Color.WHITE);
+        closeBtn.setFocusPainted(false);
+        panel.add(closeBtn, "gaptop 15, right");
+
+        ModalManager.show(panel);
+    }
+
+    private JPanel createLeyendaItem(String label, String description, Color color) {
+        JPanel item = new JPanel(new MigLayout("insets 5, fillx", "[40!][]", "[]"));
+        item.setOpaque(false);
+
+        JLabel lblColor = new JLabel(label);
+        lblColor.setFont(new Font("Segoe UI", Font.BOLD, 12));
+        lblColor.setForeground(color);
+        
+        JLabel desc = new JLabel("<html>" + description + "</html>");
+        desc.setFont(new Font("Segoe UI", Font.PLAIN, 12));
+        desc.setForeground(new Color(200, 210, 220));
+
+        item.add(lblColor);
+        item.add(desc, "growx");
+        return item;
     }
 }

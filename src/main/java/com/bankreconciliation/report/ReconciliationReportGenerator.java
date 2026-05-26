@@ -30,6 +30,7 @@ public class ReconciliationReportGenerator {
     // ────────── Report Data Model ──────────
 
     public static class ReportData {
+        public String bankName;
         // Libro Contable
         public double libroSaldoInicial;
         public double libroTotalDebe;
@@ -64,8 +65,10 @@ public class ReconciliationReportGenerator {
 
     public static ReportData calculate(List<Transaction> bookTransactions,
             List<Transaction> bankTransactions,
-            double saldoInicial) {
+            double saldoInicial,
+            String bankName) {
         ReportData data = new ReportData();
+        data.bankName = bankName;
 
         // ── Libro Contable ──
         data.libroSaldoInicial = saldoInicial;
@@ -217,9 +220,9 @@ public class ReconciliationReportGenerator {
         sideBySide.setBackground(Color.WHITE);
         sideBySide.setMaximumSize(new Dimension(Integer.MAX_VALUE, 180));
 
-        sideBySide.add(buildAccountBlock("📘  LIBRO CONTABLE BANCOS",
+        sideBySide.add(buildAccountBlock("LIBRO CONTABLE BANCOS",
                 data.libroSaldoInicial, data.libroTotalDebe, data.libroTotalHaber, data.libroSaldoFinal));
-        sideBySide.add(buildAccountBlock("🏦  EXTRACTO BANCARIO",
+        sideBySide.add(buildAccountBlock("EXTRACTO BANCARIO",
                 data.bancoSaldoInicial, data.bancoTotalDebe, data.bancoTotalHaber, data.bancoSaldoFinal));
 
         panel.add(sideBySide);

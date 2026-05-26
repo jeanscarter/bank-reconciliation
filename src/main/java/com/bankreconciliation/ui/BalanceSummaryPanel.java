@@ -50,12 +50,12 @@ public class BalanceSummaryPanel extends JPanel {
         reconciledBalanceValue = new JLabel();
         reconciledCountValue = new JLabel();
 
-        add(createCard("Saldo Banco", bankBalanceValue, "🏦", new Color(33, 150, 243)), "grow");
-        add(createCard("Dep. en Tránsito", transitDepositsValue, "📥", new Color(76, 175, 80)), "grow");
-        add(createCard("Cheques en Tránsito", transitChecksValue, "📤", new Color(244, 67, 54)), "grow");
-        add(createCard("Ajustes", adjustmentsValue, "⚙", new Color(156, 39, 176)), "grow");
-        add(createCard("Saldo Conciliado", reconciledBalanceValue, "✓", new Color(0, 150, 136)), "grow");
-        add(createCard("Conciliadas", reconciledCountValue, "📊", new Color(255, 152, 0)), "grow");
+        add(createCard("Saldo Banco", bankBalanceValue, "$", new Color(33, 150, 243)), "grow");
+        add(createCard("Dep. en Tránsito", transitDepositsValue, "+", new Color(76, 175, 80)), "grow");
+        add(createCard("Cheques en Tránsito", transitChecksValue, "-", new Color(244, 67, 54)), "grow");
+        add(createCard("Ajustes", adjustmentsValue, "*", new Color(156, 39, 176)), "grow");
+        add(createCard("Saldo Conciliado", reconciledBalanceValue, "=", new Color(0, 150, 136)), "grow");
+        add(createCard("Conciliadas", reconciledCountValue, "#", new Color(255, 152, 0)), "grow");
 
         recalculate();
     }
@@ -85,7 +85,7 @@ public class BalanceSummaryPanel extends JPanel {
         headerRow.add(titleLabel);
 
         JLabel iconLabel = new JLabel(icon);
-        iconLabel.setFont(new Font("Segoe UI Emoji", Font.PLAIN, 18));
+        iconLabel.setFont(new Font("Segoe UI", Font.BOLD, 18));
         headerRow.add(iconLabel);
 
         card.add(headerRow, "growx");

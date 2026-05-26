@@ -205,4 +205,9 @@ public class BncProfitLedgerProcessor implements FileParser {
             return false;
         }
     }
+
+    @Override
+    public String getBankName() {
+        return "BNC";
+    }
 }

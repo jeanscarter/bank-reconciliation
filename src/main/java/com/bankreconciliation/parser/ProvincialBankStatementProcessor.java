@@ -614,4 +614,9 @@ public class ProvincialBankStatementProcessor implements FileParser {
 
         return result == JOptionPane.YES_OPTION;
     }
+
+    @Override
+    public String getBankName() {
+        return "Provincial";
+    }
 }

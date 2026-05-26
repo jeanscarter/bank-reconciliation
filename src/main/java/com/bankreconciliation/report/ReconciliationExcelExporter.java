@@ -31,7 +31,11 @@ public class ReconciliationExcelExporter {
             // ── Title ──
             Row titleRow = sheet.createRow(0);
             Cell titleCell = titleRow.createCell(0);
-            titleCell.setCellValue("REPORTE DE CONCILIACIÓN BANCARIA");
+            String titleStr = "REPORTE DE CONCILIACIÓN BANCARIA";
+            if (data.bankName != null && !data.bankName.equals("Desconocido")) {
+                titleStr += " " + data.bankName.toUpperCase();
+            }
+            titleCell.setCellValue(titleStr);
             titleCell.setCellStyle(titleStyle);
             sheet.addMergedRegion(new CellRangeAddress(0, 0, 0, 4));
 

@@ -17,7 +17,8 @@ public class ReportOverlay extends JPanel {
 
     public ReportOverlay(List<Transaction> bookTransactions,
             List<Transaction> bankTransactions,
-            double saldoInicial) {
+            double saldoInicial,
+            String bankName) {
         setOpaque(false);
         setLayout(new GridBagLayout()); // Centering the card
 
@@ -31,7 +32,7 @@ public class ReportOverlay extends JPanel {
         JPanel header = new JPanel(new MigLayout("insets 0, fillx", "[]push[]", ""));
         header.setOpaque(false);
 
-        JLabel titleLabel = new JLabel("📄  Reporte de Conciliación Bancaria");
+        JLabel titleLabel = new JLabel("Reporte de Conciliación Bancaria");
         titleLabel.setFont(new Font("Segoe UI", Font.BOLD, 20));
         titleLabel.setForeground(Color.WHITE);
         header.add(titleLabel);
@@ -50,7 +51,7 @@ public class ReportOverlay extends JPanel {
 
         // ── Report Content ──
         ReportData reportData = ReconciliationReportGenerator.calculate(
-                bookTransactions, bankTransactions, saldoInicial);
+                bookTransactions, bankTransactions, saldoInicial, bankName);
         JPanel reportPanel = ReconciliationReportGenerator.buildReportPanel(reportData);
 
         JScrollPane scrollPane = new JScrollPane(reportPanel);
@@ -62,7 +63,7 @@ public class ReportOverlay extends JPanel {
         JPanel footer = new JPanel(new MigLayout("insets 8 0 0 0, fillx", "push[]", ""));
         footer.setOpaque(false);
 
-        JButton exportBtn = new JButton("💾 Exportar Excel");
+        JButton exportBtn = new JButton("Exportar Excel");
         exportBtn.setFont(new Font("Segoe UI", Font.BOLD, 13));
         exportBtn.setForeground(Color.WHITE);
         exportBtn.setBackground(new Color(40, 167, 69)); // Green
@@ -87,7 +88,7 @@ public class ReportOverlay extends JPanel {
                             file.getAbsolutePath());
                     Toast.show("Reporte exportado exitosamente", Toast.Type.SUCCESS);
                 } catch (Exception ex) {
-                    ex.printStackTrace();
+                    System.err.println("Error al exportar reporte: " + ex.getMessage());
                     Toast.show("Error al exportar reporte: " + ex.getMessage(), Toast.Type.ERROR);
                 }
             }

@@ -28,4 +28,12 @@ public interface FileParser {
      * @return the initial balance, or 0.0 if not found
      */
     double extractSaldoInicial(File file);
+
+    /**
+     * Get the bank name associated with this parser.
+     * @return The bank name, or "Desconocido" if generic.
+     */
+    default String getBankName() {
+        return "Desconocido";
+    }
 }

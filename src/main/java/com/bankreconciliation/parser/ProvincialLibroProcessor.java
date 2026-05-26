@@ -545,4 +545,9 @@ public class ProvincialLibroProcessor implements FileParser {
 
         return result == JOptionPane.YES_OPTION;
     }
+
+    @Override
+    public String getBankName() {
+        return "Provincial";
+    }
 }

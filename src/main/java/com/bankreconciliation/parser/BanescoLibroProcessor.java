@@ -178,4 +178,9 @@ public class BanescoLibroProcessor implements FileParser {
         String name = file.getName().toUpperCase();
         return name.contains("BANESCO") && (name.endsWith(".XLS") || name.endsWith(".XLSX"));
     }
+
+    @Override
+    public String getBankName() {
+        return "Banesco";
+    }
 }
