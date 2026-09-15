@@ -5,6 +5,7 @@ import com.bankreconciliation.ReconciliationEngine.NearMatch;
 import com.bankreconciliation.model.Transaction;
 import com.bankreconciliation.ui.table.BadgeRenderer;
 import com.bankreconciliation.ui.table.CurrencyRenderer;
+import com.bankreconciliation.util.DialogHelper;
 import net.miginfocom.swing.MigLayout;
 
 import javax.swing.*;
@@ -123,18 +124,8 @@ public class ReconciliationPanel extends JPanel {
     }
 
     private void exportOpcProcesses() {
-        JFileChooser fileChooser = new JFileChooser();
-        fileChooser.setDialogTitle("Guardar Reporte OPC");
-        fileChooser.setFileFilter(
-                new javax.swing.filechooser.FileNameExtensionFilter("Archivos Excel (*.xlsx)", "xlsx"));
-        fileChooser.setSelectedFile(new java.io.File("Procesos_OPC_" + bankName + ".xlsx"));
-
-        if (fileChooser.showSaveDialog(this) == JFileChooser.APPROVE_OPTION) {
-            java.io.File file = fileChooser.getSelectedFile();
-            if (!file.getName().toLowerCase().endsWith(".xlsx")) {
-                file = new java.io.File(file.getParentFile(), file.getName() + ".xlsx");
-            }
-
+        java.io.File file = DialogHelper.chooseSaveFile(this, "Guardar Reporte OPC", "Procesos_OPC_" + bankName + ".xlsx", ".xlsx");
+        if (file != null) {
             try {
                 com.bankreconciliation.report.OpcExcelExporter.export(bookTransactions, bankTransactions, bankName, file.getAbsolutePath());
                 Toast.show("Reporte OPC exportado exitosamente", Toast.Type.SUCCESS);

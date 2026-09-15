@@ -2,6 +2,7 @@ package com.bankreconciliation.ui;
 
 import com.bankreconciliation.ReconciliationEngine.NearMatch;
 import com.bankreconciliation.model.Transaction;
+import com.bankreconciliation.util.DialogHelper;
 import net.miginfocom.swing.MigLayout;
 import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
@@ -181,15 +182,8 @@ public class LargeDifferenceReviewOverlay extends RoundedPanel {
     }
 
     private void exportToExcel() {
-        JFileChooser fileChooser = new JFileChooser();
-        fileChooser.setDialogTitle("Guardar Reporte de Diferencias");
-        fileChooser.setSelectedFile(new File("Diferencias_Mayores.xlsx"));
-
-        if (fileChooser.showSaveDialog(this) == JFileChooser.APPROVE_OPTION) {
-            File file = fileChooser.getSelectedFile();
-            if (!file.getName().toLowerCase().endsWith(".xlsx")) {
-                file = new File(file.getAbsolutePath() + ".xlsx");
-            }
+        File file = DialogHelper.chooseSaveFile(this, "Guardar Reporte de Diferencias", "Diferencias_Mayores.xlsx", ".xlsx");
+        if (file != null) {
 
             try (Workbook workbook = new XSSFWorkbook()) {
                 Sheet sheet = workbook.createSheet("Diferencias Mayores");

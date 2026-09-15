@@ -3,6 +3,7 @@ package com.bankreconciliation.ui;
 import com.bankreconciliation.model.Transaction;
 import com.bankreconciliation.report.ReconciliationReportGenerator;
 import com.bankreconciliation.report.ReconciliationReportGenerator.ReportData;
+import com.bankreconciliation.util.DialogHelper;
 import net.miginfocom.swing.MigLayout;
 
 import javax.swing.*;
@@ -71,18 +72,8 @@ public class ReportOverlay extends JPanel {
         exportBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         exportBtn.setPreferredSize(new Dimension(150, 36));
         exportBtn.addActionListener(e -> {
-            JFileChooser fileChooser = new JFileChooser();
-            fileChooser.setDialogTitle("Guardar Reporte de Conciliación");
-            fileChooser.setFileFilter(
-                    new javax.swing.filechooser.FileNameExtensionFilter("Archivos Excel (*.xlsx)", "xlsx"));
-            fileChooser.setSelectedFile(new java.io.File("Conciliacion_Bancaria.xlsx"));
-
-            if (fileChooser.showSaveDialog(this) == JFileChooser.APPROVE_OPTION) {
-                java.io.File file = fileChooser.getSelectedFile();
-                if (!file.getName().toLowerCase().endsWith(".xlsx")) {
-                    file = new java.io.File(file.getParentFile(), file.getName() + ".xlsx");
-                }
-
+            java.io.File file = DialogHelper.chooseSaveFile(this, "Guardar Reporte de Conciliación", "Conciliacion_Bancaria.xlsx", ".xlsx");
+            if (file != null) {
                 try {
                     com.bankreconciliation.report.ReconciliationExcelExporter.export(reportData,
                             file.getAbsolutePath());

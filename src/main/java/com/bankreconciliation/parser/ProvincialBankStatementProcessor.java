@@ -154,6 +154,11 @@ public class ProvincialBankStatementProcessor implements FileParser {
             // Código de banco Provincial: 0108
             boolean hasBankCode = firstPage.contains("0108-");
 
+            // Exclude Profit Plus files which may happen to contain 0108-
+            if (upper.contains("PROFIT")) {
+                return false;
+            }
+
             return hasEstadoCuenta && (hasProvincial || hasBankCode);
         } catch (Exception e) {
             return false;

@@ -4,6 +4,7 @@ import com.bankreconciliation.model.Transaction;
 import com.bankreconciliation.parser.ColumnMapper;
 import com.bankreconciliation.parser.FileParser;
 import com.bankreconciliation.parser.ParserFactory;
+import com.bankreconciliation.util.DialogHelper;
 import net.miginfocom.swing.MigLayout;
 
 import javax.swing.*;
@@ -404,16 +405,12 @@ public class FileUploadPanel extends JPanel {
     }
 
     private void openFileChooser(Transaction.Source source, Color accent) {
-        JFileChooser chooser = new JFileChooser();
-        chooser.setDialogTitle(source == Transaction.Source.BOOK
+        String title = source == Transaction.Source.BOOK
                 ? "Seleccionar Libro Contable"
-                : "Seleccionar Estado de Cuenta");
-        chooser.setFileFilter(new FileNameExtensionFilter(
-                "Archivos compatibles (XLS, CSV, PDF, TXT)", "xls", "xlsx", "csv", "pdf", "txt"));
-        chooser.setAcceptAllFileFilterUsed(false);
-
-        if (chooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
-            processFile(chooser.getSelectedFile(), source);
+                : "Seleccionar Estado de Cuenta";
+        File file = DialogHelper.chooseOpenFile(this, title, "*.xls;*.xlsx;*.csv;*.pdf;*.txt");
+        if (file != null) {
+            processFile(file, source);
         }
     }
 
