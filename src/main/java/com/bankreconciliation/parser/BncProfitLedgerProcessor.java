@@ -428,16 +428,24 @@ public class BncProfitLedgerProcessor implements FileParser {
     }
 
     public static boolean isProfitLedger(File file) {
+        String filename = file.getName().toUpperCase();
         try (PDDocument doc = Loader.loadPDF(file)) {
             PDFTextStripper stripper = new PDFTextStripper();
             stripper.setStartPage(1);
             stripper.setEndPage(1);
             String text = stripper.getText(doc).toUpperCase();
-            // Look for Profit Plus identifiers found in BNC export
-            // The file name says "SEGUN PROFIT", so maybe header has "PROFIT PLUS"?
-            // Or just check for "PROFIT"
-            return text.contains("PROFIT")
-                    || (text.contains("DEBE") && text.contains("HABER") && text.contains("SALDO"));
+
+            // Look for Profit Plus identifiers
+            boolean hasProfitKeyword = filename.contains("PROFIT") || text.contains("PROFIT")
+                    || text.contains("PROFIT PLUS");
+            if (hasProfitKeyword) {
+                return true;
+            }
+
+            // Also check for distinct Profit Plus report headers if "PROFIT" keyword is not explicitly in text/filename
+            return (text.contains("MOVIMIENTOS DE BANCO POR FECHA") || text.contains("ESTADO DE CUENTA BANCARIA MULTIMONEDA"))
+                    && !text.contains("BNCNET")
+                    && !text.contains("BANCO NACIONAL DE CR");
         } catch (Exception e) {
             return false;
         }

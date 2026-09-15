@@ -26,6 +26,9 @@ public class MainFrame extends JFrame {
         setMinimumSize(new Dimension(1100, 700));
         setLocationRelativeTo(null);
 
+        // Load Application Icon
+        loadAppIcon();
+
         // Init overlay systems
         ModalManager.init(this);
         Toast.setParentFrame(this);
@@ -182,5 +185,33 @@ public class MainFrame extends JFrame {
         item.add(lblColor);
         item.add(desc, "growx");
         return item;
+    }
+
+    private void loadAppIcon() {
+        try {
+            Image icon = null;
+            java.net.URL iconUrl = getClass().getResource("/icons/app-icon.png");
+            if (iconUrl != null) {
+                icon = new ImageIcon(iconUrl).getImage();
+            } else {
+                java.io.File external = new java.io.File("C:\\Users\\Jean\\Desktop\\ConciliacionBancaria.png");
+                if (external.exists()) {
+                    icon = new ImageIcon(external.getAbsolutePath()).getImage();
+                }
+            }
+
+            if (icon != null) {
+                setIconImage(icon);
+
+                // Set taskbar icon if supported
+                if (Taskbar.isTaskbarSupported()) {
+                    Taskbar taskbar = Taskbar.getTaskbar();
+                    if (taskbar.isSupported(Taskbar.Feature.ICON_IMAGE)) {
+                        taskbar.setIconImage(icon);
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+        }
     }
 }

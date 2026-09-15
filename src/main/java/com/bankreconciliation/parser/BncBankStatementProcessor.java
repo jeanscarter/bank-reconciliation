@@ -220,9 +220,13 @@ public class BncBankStatementProcessor implements FileParser {
     }
 
     public static boolean isBncBankStatement(File file) {
-        // Fallback: Check filename
         String filename = file.getName().toUpperCase();
-        if (filename.contains("BNC") && filename.contains("ESTADO") && !filename.contains("PROFIT")) {
+        if (filename.contains("PROFIT")) {
+            return false;
+        }
+
+        // Fallback: Check filename with BNC and ESTADO or MOVIMIENTO
+        if (filename.contains("BNC") && (filename.contains("ESTADO") || filename.contains("MOVIMIENTO"))) {
             return true;
         }
 
@@ -232,17 +236,17 @@ public class BncBankStatementProcessor implements FileParser {
             stripper.setEndPage(1);
             String text = stripper.getText(doc).toUpperCase();
 
-            // DEBUG DETECTION
-            try (java.io.FileWriter fw = new java.io.FileWriter("debug_bnc_detection.txt", true)) {
-                fw.write("Checking file: " + file.getName() + "\n");
-                fw.write("Content: " + text + "\n");
-            } catch (Exception ignored) {
+            // Exclude Profit Plus files
+            if (text.contains("PROFIT")) {
+                return false;
             }
 
             // Look for BNC identifiers
             return text.contains("BANCO NACIONAL DE CREDITO") // Plain
                     || text.contains("BANCO NACIONAL DE CRÉDITO") // Accent
-                    || (text.contains("BNC") && text.contains("ESTADO DE CUENTA"));
+                    || text.contains("BNCNET")
+                    || (text.contains("BNC") && (text.contains("ESTADO DE CUENTA") || text.contains("MOVIMIENTOS ENTRE FECHAS")))
+                    || (filename.contains("BNC") && (text.contains("ESTADO") || text.contains("MOVIMIENTOS") || text.contains("DEBE")));
         } catch (Exception e) {
             return false;
         }
