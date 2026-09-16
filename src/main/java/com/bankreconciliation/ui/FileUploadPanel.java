@@ -8,7 +8,6 @@ import com.bankreconciliation.util.DialogHelper;
 import net.miginfocom.swing.MigLayout;
 
 import javax.swing.*;
-import javax.swing.filechooser.FileNameExtensionFilter;
 import javax.swing.table.AbstractTableModel;
 import javax.swing.table.DefaultTableCellRenderer;
 import java.awt.*;

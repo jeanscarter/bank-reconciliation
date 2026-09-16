@@ -76,8 +76,7 @@ public class BanescoBankStatementProcessor implements FileParser {
             stripper.setStartPage(1);
             stripper.setEndPage(1);
             String text = stripper.getText(document);
-            Matcher m = SALDO_MES_ANTERIOR_PATTERN.matcher(text.toUpperCase().replace(".", "").replace(",", "."));
-            // Actually, better to search raw text and parse European amount
+            // Search raw text and parse European amount
             for (String line : text.split("\\r?\\n")) {
                 String upper = line.trim().toUpperCase();
                 if (upper.contains("SALDO MES ANTERIOR") || upper.contains("SALDO ANTERIOR")) {
@@ -395,10 +394,8 @@ public class BanescoBankStatementProcessor implements FileParser {
             // Find amounts from the end
             List<String> amounts = new ArrayList<>();
             Matcher amtM = EUR_AMT.matcher(segment);
-            int lastAmtStart = -1;
             while (amtM.find()) {
                 amounts.add(amtM.group(1));
-                if (amounts.size() == 1) lastAmtStart = amtM.start();
             }
             if (amounts.size() < 2) return null;
 
