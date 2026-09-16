@@ -49,10 +49,6 @@ public class BanescoBankStatementProcessor implements FileParser {
     private static final Pattern DAY_ONLY_PATTERN = Pattern.compile(
             "^(\\d{2})\\s+(\\d{5,})\\s+(.+?)\\s+(-?\\d{1,3}(?:\\.\\d{3})*,\\d{2})\\s+(-?\\d{1,3}(?:\\.\\d{3})*,\\d{2})$");
 
-    // Pattern for saldo mes anterior line
-    private static final Pattern SALDO_MES_ANTERIOR_PATTERN = Pattern.compile(
-            "SALDO\\s+MES\\s+ANTERIOR\\s+(-?\\d{1,3}(?:\\.\\d{3})*,\\d{2})");
-
     // European amount pattern
     private static final Pattern EUR_AMT = Pattern.compile(
             "(-?\\d{1,3}(?:\\.\\d{3})*,\\d{2})");
