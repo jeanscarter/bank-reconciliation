@@ -199,7 +199,7 @@ public class LargeDifferenceReviewOverlay extends RoundedPanel {
 
                 // Header
                 Row headerRow = sheet.createRow(0);
-                String[] headers = { "Fecha Libro", "Ref Libro", "Monto Libro", "Fecha Banco", "Ref Banco",
+                String[] headers = { "Fecha Libro de Banco", "Ref Libro de Banco", "Monto Libro de Banco", "Fecha Banco", "Ref Banco",
                         "Desc Banco", "Monto Banco", "Diferencia" };
                 for (int i = 0; i < headers.length; i++) {
                     Cell cell = headerRow.createCell(i);
@@ -256,7 +256,7 @@ public class LargeDifferenceReviewOverlay extends RoundedPanel {
 
     private class LargeDiffTableModel extends AbstractTableModel {
         private final String[] COLS = {
-                "Fecha Libro", "Ref Libro", "Monto Libro",
+                "Fecha Libro de Banco", "Ref Libro de Banco", "Monto Libro de Banco",
                 "Fecha Banco", "Ref Banco", "Desc. Banco", "Monto Banco", "Diferencia"
         };
 

@@ -28,6 +28,7 @@ public class ReconciliationPanel extends JPanel {
     private TransactionTableModel bookModel;
     private TransactionTableModel bankModel;
     private List<NearMatch> pendingNearMatches;
+    private JButton largeDiffBtn;
 
     private RecurringChargesPanel recurringChargesPanel;
 
@@ -53,7 +54,7 @@ public class ReconciliationPanel extends JPanel {
         recurringChargesPanel = new RecurringChargesPanel();
         add(recurringChargesPanel, "span 2, growx, wrap");
 
-        JPanel bookPanel = createTablePanel("Libro Contable", bookTransactions, Transaction.Source.BOOK,
+        JPanel bookPanel = createTablePanel("Libro de Banco", bookTransactions, Transaction.Source.BOOK,
                 new String[] { "Fecha", "Ref", "Descripción", "Debe", "Haber", "Estado" });
         JPanel bankPanel = createTablePanel("Estado de Cuenta Bancario", bankTransactions, Transaction.Source.BANK,
                 new String[] { "Fecha", "Ref", "Descripción", "Depósito", "Retiro", "Estado" });
@@ -100,7 +101,7 @@ public class ReconciliationPanel extends JPanel {
         reviewBtn.addActionListener(e -> openNearMatchReview());
         bar.add(reviewBtn);
 
-        JButton largeDiffBtn = new JButton("Diferencias Mayores");
+        largeDiffBtn = new JButton("Diferencias Mayores");
         largeDiffBtn.setFont(new Font("Segoe UI", Font.PLAIN, 12));
         largeDiffBtn.setForeground(new Color(255, 100, 100)); // Red-ish
         largeDiffBtn.setContentAreaFilled(false);
@@ -148,6 +149,20 @@ public class ReconciliationPanel extends JPanel {
         ModalManager.show(overlay);
     }
 
+    private void updateLargeDiffButtonState() {
+        if (largeDiffBtn == null) return;
+        List<NearMatch> largeDiffs = ReconciliationEngine.findLargeDifferences(bookTransactions, bankTransactions);
+        if (!largeDiffs.isEmpty()) {
+            largeDiffBtn.setText("Diferencias Mayores (" + largeDiffs.size() + ")");
+            largeDiffBtn.setFont(new Font("Segoe UI", Font.BOLD, 12));
+            largeDiffBtn.setForeground(new Color(255, 80, 80));
+        } else {
+            largeDiffBtn.setText("Diferencias Mayores");
+            largeDiffBtn.setFont(new Font("Segoe UI", Font.PLAIN, 12));
+            largeDiffBtn.setForeground(new Color(255, 100, 100));
+        }
+    }
+
     // ======================== Auto-Reconciliation ========================
 
     private void runAutoReconciliation() {
@@ -182,6 +197,15 @@ public class ReconciliationPanel extends JPanel {
 
         System.out.println("Fase 3 (Final): " + result.unmatched() + " asignadas como no conciliadas.");
         refreshAll();
+
+        // Check and update large differences state
+        updateLargeDiffButtonState();
+        List<NearMatch> largeDiffs = ReconciliationEngine.findLargeDifferences(bookTransactions, bankTransactions);
+        if (!largeDiffs.isEmpty()) {
+            SwingUtilities.invokeLater(() -> {
+                Toast.show("Atención: " + largeDiffs.size() + " discrepancia(s) en saldos con referencias coincidentes.", Toast.Type.WARNING);
+            });
+        }
     }
 
     private void openNearMatchReview() {

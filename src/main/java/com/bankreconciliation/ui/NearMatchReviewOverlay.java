@@ -227,7 +227,7 @@ public class NearMatchReviewOverlay extends RoundedPanel {
 
     private class NearMatchTableModel extends AbstractTableModel {
         private final String[] COLS = {
-                "✓", "Fecha Libro", "Ref Libro", "Monto Libro",
+                "✓", "Fecha Libro de Banco", "Ref Libro de Banco", "Monto Libro de Banco",
                 "Fecha Banco", "Ref Banco", "Desc. Banco", "Monto Banco", "Diferencia"
         };
 

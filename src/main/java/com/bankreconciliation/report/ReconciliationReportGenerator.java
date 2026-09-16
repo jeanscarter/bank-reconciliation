@@ -59,6 +59,9 @@ public class ReconciliationReportGenerator {
 
         // Cargos Recurrentes
         public List<RecurringCharge> recurringCharges = new ArrayList<>();
+
+        // Discrepancias en saldos (referencias coincidentes)
+        public List<com.bankreconciliation.ReconciliationEngine.NearMatch> largeDifferences = new ArrayList<>();
     }
 
     // ────────── Calculate Report ──────────
@@ -69,8 +72,9 @@ public class ReconciliationReportGenerator {
             String bankName) {
         ReportData data = new ReportData();
         data.bankName = bankName;
+        data.largeDifferences = com.bankreconciliation.ReconciliationEngine.findLargeDifferences(bookTransactions, bankTransactions);
 
-        // ── Libro Contable ──
+        // ── Libro de Banco ──
         data.libroSaldoInicial = saldoInicial;
         double libroTotalDebe = 0;
         double libroTotalHaber = 0;
@@ -215,12 +219,12 @@ public class ReconciliationReportGenerator {
         panel.add(titleBanner);
         panel.add(Box.createVerticalStrut(16));
 
-        // ── Side-by-side: Libro Contable vs Extracto Bancario ──
+        // ── Side-by-side: Libro de Banco vs Extracto Bancario ──
         JPanel sideBySide = new JPanel(new GridLayout(1, 2, 24, 0));
         sideBySide.setBackground(Color.WHITE);
         sideBySide.setMaximumSize(new Dimension(Integer.MAX_VALUE, 180));
 
-        sideBySide.add(buildAccountBlock("LIBRO CONTABLE BANCOS",
+        sideBySide.add(buildAccountBlock("LIBRO DE BANCO",
                 data.libroSaldoInicial, data.libroTotalDebe, data.libroTotalHaber, data.libroSaldoFinal));
         sideBySide.add(buildAccountBlock("EXTRACTO BANCARIO",
                 data.bancoSaldoInicial, data.bancoTotalDebe, data.bancoTotalHaber, data.bancoSaldoFinal));
@@ -234,11 +238,11 @@ public class ReconciliationReportGenerator {
         diffPanel.setBackground(Color.WHITE);
         diffPanel.setBorder(BorderFactory.createEmptyBorder(0, 8, 0, 8));
 
-        addDiffRow(diffPanel, "Diferencia Libro Bancos - Extracto Bancario", data.diferencia, false, false);
+        addDiffRow(diffPanel, "Diferencia Libro de Banco - Extracto Bancario", data.diferencia, false, false);
         addDiffRow(diffPanel, "(-) DNA - Depósito no abonado en cuenta bancaria", -data.totalDNA, false, true);
         addDiffRow(diffPanel, "(+) RNE - Retiro no efectuado en CB o cheque no cobrado", data.totalRNE, false, false);
-        addDiffRow(diffPanel, "(+) ANR - Abono en CB no registrado en Libro Bancos", data.totalANR, false, false);
-        addDiffRow(diffPanel, "(-) CNR - Cargo en CB no registrado en Libro Bancos", -data.totalCNR, false, true);
+        addDiffRow(diffPanel, "(+) ANR - Abono en CB no registrado en Libro de Banco", data.totalANR, false, false);
+        addDiffRow(diffPanel, "(-) CNR - Cargo en CB no registrado en Libro de Banco", -data.totalCNR, false, true);
 
         panel.add(diffPanel);
         panel.add(Box.createVerticalStrut(12));
@@ -364,10 +368,23 @@ public class ReconciliationReportGenerator {
         // Build combined list
         List<DetailRow> rows = new ArrayList<>();
 
+        if (data.largeDifferences != null && !data.largeDifferences.isEmpty()) {
+            rows.add(new DetailRow("[!] DISCREPANCIAS EN SALDOS (REFERENCIA COINCIDENTE)", true));
+            for (com.bankreconciliation.ReconciliationEngine.NearMatch nm : data.largeDifferences) {
+                Transaction bkT = nm.books().get(0);
+                Transaction bnkT = nm.banks().get(0);
+                String desc = "Libro: " + FMT.format(bkT.getAbsAmount()) + " vs Banco: " + FMT.format(bnkT.getAbsAmount())
+                        + " (Dif: " + formatSigned(nm.difference()) + ")";
+                rows.add(new DetailRow(bkT.getReference() + " / " + bnkT.getReference(),
+                        bkT.getDate() != null ? bkT.getDate().toString() : "", desc, formatSigned(nm.difference())));
+            }
+            rows.add(new DetailRow("", false)); // empty separator row
+        }
+
         addGroupToRows(rows, "(-) DNA - Depósito no abonado en cuenta bancaria", data.dnaTransactions);
         addGroupToRows(rows, "(+) RNE - Retiro no efectuado en CB o cheque no cobrado", data.rneTransactions);
-        addGroupToRows(rows, "(+) ANR - Abono en CB no registrado en Libro Bancos", data.anrTransactions);
-        addGroupToRows(rows, "(-) CNR - Cargo en CB no registrado en Libro Bancos", data.cnrTransactions);
+        addGroupToRows(rows, "(+) ANR - Abono en CB no registrado en Libro de Banco", data.anrTransactions);
+        addGroupToRows(rows, "(-) CNR - Cargo en CB no registrado en Libro de Banco", data.cnrTransactions);
 
         // Table
         String[] columns = { "NRO OPERACIÓN", "FECHA", "DESCRIPCIÓN", "MONTO" };
@@ -512,6 +529,10 @@ public class ReconciliationReportGenerator {
             this.description = description;
             this.amount = amount;
             this.isHeader = isHeader;
+        }
+
+        DetailRow(String ref, String date, String description, String amount) {
+            this(ref, date, description, amount, false);
         }
     }
 

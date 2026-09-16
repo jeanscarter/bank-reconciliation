@@ -31,18 +31,27 @@ public class ReconciliationEngine {
 
     /**
      * Ejecuta SOLO la conciliación exacta (Pass 1 y 2).
+     * Pass 1: Coincidencia por Referencia (Exacta o últimos 6 dígitos) + Monto.
+     * Pass 2: Coincidencia por Monto.
      */
     public static Result performExactMatch(List<Transaction> bookTransactions,
             List<Transaction> bankTransactions) {
         int matchedByRef = 0;
         int matchedByAmount = 0;
 
-        // Pass 1: Match by Ref + Amount
-        Map<String, List<Transaction>> bankByRef = new HashMap<>();
+        // Pass 1: Match by Ref (Exact or Last 6 Digits) + Amount
+        Map<String, List<Transaction>> bankByExactRef = new HashMap<>();
+        Map<String, List<Transaction>> bankByLast6 = new HashMap<>();
         for (Transaction bt : bankTransactions) {
             if (bt.isPending()) {
                 String ref = normalizeRef(bt.getReference());
-                bankByRef.computeIfAbsent(ref, k -> new ArrayList<>()).add(bt);
+                if (!ref.isEmpty()) {
+                    bankByExactRef.computeIfAbsent(ref.toLowerCase(), k -> new ArrayList<>()).add(bt);
+                }
+                String last6 = getLast6Digits(bt.getReference());
+                if (!last6.isEmpty()) {
+                    bankByLast6.computeIfAbsent(last6, k -> new ArrayList<>()).add(bt);
+                }
             }
         }
 
@@ -51,17 +60,35 @@ public class ReconciliationEngine {
                 continue;
 
             String bookRef = normalizeRef(bookTx.getReference());
-            List<Transaction> candidates = bankByRef.get(bookRef);
-            if (candidates == null)
-                continue;
+            String bookLast6 = getLast6Digits(bookTx.getReference());
 
             Transaction match = null;
-            for (Transaction candidate : candidates) {
-                if (!candidate.isPending())
-                    continue;
-                if (amountsMatch(bookTx, candidate)) {
-                    match = candidate;
-                    break;
+
+            // 1. Try exact normalized reference first
+            List<Transaction> candidates = bookRef.isEmpty() ? null : bankByExactRef.get(bookRef.toLowerCase());
+            if (candidates != null) {
+                for (Transaction candidate : candidates) {
+                    if (!candidate.isPending())
+                        continue;
+                    if (amountsMatch(bookTx, candidate)) {
+                        match = candidate;
+                        break;
+                    }
+                }
+            }
+
+            // 2. If no exact match, try matching by last 6 digits
+            if (match == null && !bookLast6.isEmpty()) {
+                List<Transaction> last6Candidates = bankByLast6.get(bookLast6);
+                if (last6Candidates != null) {
+                    for (Transaction candidate : last6Candidates) {
+                        if (!candidate.isPending())
+                            continue;
+                        if (amountsMatch(bookTx, candidate)) {
+                            match = candidate;
+                            break;
+                        }
+                    }
                 }
             }
 
@@ -154,7 +181,7 @@ public class ReconciliationEngine {
         b.setMatchedId(a.getId());
     }
 
-    private static String normalizeRef(String ref) {
+    public static String normalizeRef(String ref) {
         if (ref == null)
             return "";
         // Remove leading zeros and trim
@@ -163,10 +190,35 @@ public class ReconciliationEngine {
     }
 
     // Removes "-1", "-2" suffixes to get the base reference
-    private static String getBaseRef(String ref) {
+    public static String getBaseRef(String ref) {
         String norm = normalizeRef(ref);
         // Remove "-X" suffix if present
         return norm.replaceAll("-\\d+$", "");
+    }
+
+    public static String cleanDigits(String ref) {
+        if (ref == null)
+            return "";
+        return ref.replaceAll("\\D", "");
+    }
+
+    public static String getLast6Digits(String ref) {
+        String digits = cleanDigits(getBaseRef(ref));
+        if (digits.length() >= 6) {
+            return digits.substring(digits.length() - 6);
+        }
+        return "";
+    }
+
+    public static boolean referenceMatches(String refA, String refB) {
+        String normA = normalizeRef(refA);
+        String normB = normalizeRef(refB);
+        if (!normA.isEmpty() && normA.equalsIgnoreCase(normB)) {
+            return true;
+        }
+        String last6A = getLast6Digits(refA);
+        String last6B = getLast6Digits(refB);
+        return !last6A.isEmpty() && last6A.equals(last6B);
     }
 
     private static boolean amountsMatch(Transaction a, Transaction b) {
@@ -204,13 +256,18 @@ public class ReconciliationEngine {
         Set<Integer> usedBookIds = new HashSet<>();
         Set<Integer> usedBankIds = new HashSet<>();
 
-        // Group bank txs by Normalized Reference for quick lookup
-        Map<String, List<Transaction>> bankByRef = new HashMap<>();
+        // Group bank txs by Normalized Reference and last 6 digits for quick lookup
+        Map<String, List<Transaction>> bankByExactRef = new HashMap<>();
+        Map<String, List<Transaction>> bankByLast6 = new HashMap<>();
         for (Transaction bt : bankTransactions) {
             if (bt.isPending()) {
                 String ref = normalizeRef(bt.getReference());
                 if (!ref.isEmpty()) {
-                    bankByRef.computeIfAbsent(ref, k -> new ArrayList<>()).add(bt);
+                    bankByExactRef.computeIfAbsent(ref.toLowerCase(), k -> new ArrayList<>()).add(bt);
+                }
+                String last6 = getLast6Digits(bt.getReference());
+                if (!last6.isEmpty()) {
+                    bankByLast6.computeIfAbsent(last6, k -> new ArrayList<>()).add(bt);
                 }
             }
         }
@@ -225,7 +282,7 @@ public class ReconciliationEngine {
                 continue;
             String baseRef = getBaseRef(bookTx.getReference());
             if (!baseRef.isEmpty()) {
-                bookGroups.computeIfAbsent(baseRef, k -> new ArrayList<>()).add(bookTx);
+                bookGroups.computeIfAbsent(baseRef.toLowerCase(), k -> new ArrayList<>()).add(bookTx);
             }
         }
 
@@ -234,7 +291,7 @@ public class ReconciliationEngine {
             List<Transaction> group = entry.getValue();
 
             // Only consider if we have a matching bank transaction for this base ref
-            List<Transaction> bankCandidates = bankByRef.get(baseRef);
+            List<Transaction> bankCandidates = bankByExactRef.get(baseRef);
             if (bankCandidates != null) {
                 // Determine group total amount
                 double groupTotal = group.stream().mapToDouble(Transaction::getAbsAmount).sum();
@@ -264,9 +321,8 @@ public class ReconciliationEngine {
         }
 
         // -------------------------------------------------------------------
-        // STRATEGY 2: 1-to-1 Match by Reference (remaining)
+        // STRATEGY 2: 1-to-1 Match by Reference (Exact or Last 6 Digits)
         // -------------------------------------------------------------------
-        // (Copied primarily from previous logic but checking used lists)
         for (Transaction bookTx : bookTransactions) {
             if (!bookTx.isPending())
                 continue;
@@ -274,39 +330,52 @@ public class ReconciliationEngine {
                 continue;
 
             String ref = normalizeRef(bookTx.getReference());
-            if (ref.isEmpty())
-                continue;
+            String last6 = getLast6Digits(bookTx.getReference());
 
-            List<Transaction> candidates = bankByRef.get(ref);
+            Transaction bestMatch = null;
+            double bestDiff = Double.MAX_VALUE;
+
+            // Try exact ref first
+            List<Transaction> candidates = ref.isEmpty() ? null : bankByExactRef.get(ref.toLowerCase());
             if (candidates != null) {
-                Transaction bestMatch = null;
-                double bestDiff = Double.MAX_VALUE;
-
                 for (Transaction bankTx : candidates) {
                     if (usedBankIds.contains(bankTx.getId()))
                         continue;
 
                     double diff = Math.abs(bookTx.getAbsAmount() - bankTx.getAbsAmount());
-
-                    // Must be within tolerance and better than current best
                     if (diff <= NEAR_MATCH_TOLERANCE && diff < bestDiff) {
-                        // Avoid 0 diff if it was somehow missed by exact match?
-                        // Actually exact match (0.01) should have been caught.
-                        // But if it wasn't caught (e.g. pass 1 skipped it for some reason), catch it
-                        // here.
                         if (diff > 0.00) {
                             bestMatch = bankTx;
                             bestDiff = diff;
                         }
                     }
                 }
+            }
 
-                if (bestMatch != null) {
-                    double signedDiff = bookTx.getAbsAmount() - bestMatch.getAbsAmount();
-                    nearMatches.add(new NearMatch(bookTx, bestMatch, signedDiff));
-                    usedBookIds.add(bookTx.getId());
-                    usedBankIds.add(bestMatch.getId());
+            // If no exact match, try last 6 digits
+            if (bestMatch == null && !last6.isEmpty()) {
+                List<Transaction> last6Candidates = bankByLast6.get(last6);
+                if (last6Candidates != null) {
+                    for (Transaction bankTx : last6Candidates) {
+                        if (usedBankIds.contains(bankTx.getId()))
+                            continue;
+
+                        double diff = Math.abs(bookTx.getAbsAmount() - bankTx.getAbsAmount());
+                        if (diff <= NEAR_MATCH_TOLERANCE && diff < bestDiff) {
+                            if (diff > 0.00) {
+                                bestMatch = bankTx;
+                                bestDiff = diff;
+                            }
+                        }
+                    }
                 }
+            }
+
+            if (bestMatch != null) {
+                double signedDiff = bookTx.getAbsAmount() - bestMatch.getAbsAmount();
+                nearMatches.add(new NearMatch(bookTx, bestMatch, signedDiff));
+                usedBookIds.add(bookTx.getId());
+                usedBankIds.add(bestMatch.getId());
             }
         }
 
@@ -350,36 +419,72 @@ public class ReconciliationEngine {
     public static List<NearMatch> findLargeDifferences(List<Transaction> bookTransactions,
             List<Transaction> bankTransactions) {
         List<NearMatch> largeDiffs = new ArrayList<>();
+        Set<Integer> usedBookIds = new HashSet<>();
+        Set<Integer> usedBankIds = new HashSet<>();
 
-        // Map bank transactions by normalized reference
-        Map<String, List<Transaction>> bankByRef = new HashMap<>();
+        // Group bank transactions by exact normalized reference and last 6 digits
+        Map<String, List<Transaction>> bankByExactRef = new HashMap<>();
+        Map<String, List<Transaction>> bankByLast6 = new HashMap<>();
         for (Transaction bt : bankTransactions) {
+            if (bt.getStatus() == Status.OPC)
+                continue;
             String ref = normalizeRef(bt.getReference());
             if (!ref.isEmpty()) {
-                bankByRef.computeIfAbsent(ref, k -> new ArrayList<>()).add(bt);
+                bankByExactRef.computeIfAbsent(ref.toLowerCase(), k -> new ArrayList<>()).add(bt);
+            }
+            String last6 = getLast6Digits(bt.getReference());
+            if (!last6.isEmpty()) {
+                bankByLast6.computeIfAbsent(last6, k -> new ArrayList<>()).add(bt);
             }
         }
 
         for (Transaction bookTx : bookTransactions) {
-            String ref = normalizeRef(bookTx.getReference());
-            if (ref.isEmpty())
+            if (bookTx.getStatus() == Status.OPC)
+                continue;
+            if (usedBookIds.contains(bookTx.getId()))
                 continue;
 
-            List<Transaction> candidates = bankByRef.get(ref);
+            String ref = normalizeRef(bookTx.getReference());
+            String last6 = getLast6Digits(bookTx.getReference());
+
+            Transaction bestBankMatch = null;
+            double bestDiff = Double.MAX_VALUE;
+
+            // 1. Try exact reference
+            List<Transaction> candidates = ref.isEmpty() ? null : bankByExactRef.get(ref.toLowerCase());
             if (candidates != null) {
                 for (Transaction bankTx : candidates) {
+                    if (bankTx.getStatus() == Status.OPC || usedBankIds.contains(bankTx.getId()))
+                        continue;
                     double diff = Math.abs(bookTx.getAbsAmount() - bankTx.getAbsAmount());
+                    if (diff > NEAR_MATCH_TOLERANCE && diff < bestDiff) {
+                        bestBankMatch = bankTx;
+                        bestDiff = diff;
+                    }
+                }
+            }
 
-                    // We are looking for differences > 1.00
-                    // And we care about transactions that are NOT Conciliated (OPC)
-                    // This allows finding differences for items marked as DNA, ANR, etc.
-                    if (bookTx.getStatus() != Status.OPC && bankTx.getStatus() != Status.OPC) {
-                        if (diff > NEAR_MATCH_TOLERANCE) { // diff > 1.00
-                            double signedDiff = bookTx.getAbsAmount() - bankTx.getAbsAmount();
-                            largeDiffs.add(new NearMatch(bookTx, bankTx, signedDiff));
+            // 2. If no exact candidate, try last 6 digits
+            if (bestBankMatch == null && !last6.isEmpty()) {
+                List<Transaction> last6Candidates = bankByLast6.get(last6);
+                if (last6Candidates != null) {
+                    for (Transaction bankTx : last6Candidates) {
+                        if (bankTx.getStatus() == Status.OPC || usedBankIds.contains(bankTx.getId()))
+                            continue;
+                        double diff = Math.abs(bookTx.getAbsAmount() - bankTx.getAbsAmount());
+                        if (diff > NEAR_MATCH_TOLERANCE && diff < bestDiff) {
+                            bestBankMatch = bankTx;
+                            bestDiff = diff;
                         }
                     }
                 }
+            }
+
+            if (bestBankMatch != null) {
+                double signedDiff = bookTx.getAbsAmount() - bestBankMatch.getAbsAmount();
+                largeDiffs.add(new NearMatch(bookTx, bestBankMatch, signedDiff));
+                usedBookIds.add(bookTx.getId());
+                usedBankIds.add(bestBankMatch.getId());
             }
         }
 

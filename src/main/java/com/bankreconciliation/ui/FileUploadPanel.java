@@ -22,7 +22,7 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Full-screen upload view with two sections for Libro Contable and Estado de
+ * Full-screen upload view with two sections for Libro de Banco and Estado de
  * Cuenta.
  * Files can be uploaded via buttons or drag-and-drop.
  */
@@ -103,7 +103,7 @@ public class FileUploadPanel extends JPanel {
         headerPanel.add(title);
 
         JLabel subtitle = new JLabel(
-                "Carga los archivos del Libro Contable y Estado de Cuenta para iniciar la conciliación");
+                "Carga los archivos del Libro de Banco y Estado de Cuenta para iniciar la conciliación");
         subtitle.setFont(new Font("Segoe UI", Font.PLAIN, 14));
         subtitle.setForeground(TEXT_MUTED);
         headerPanel.add(subtitle, "gaptop 4");
@@ -115,7 +115,7 @@ public class FileUploadPanel extends JPanel {
                 "[grow, 50%][grow, 50%]", "[grow]"));
         uploadArea.setOpaque(false);
 
-        uploadArea.add(createUploadSection("Libro Contable", Transaction.Source.BOOK, ACCENT_BLUE), "grow");
+        uploadArea.add(createUploadSection("Libro de Banco", Transaction.Source.BOOK, ACCENT_BLUE), "grow");
         uploadArea.add(createUploadSection("Estado de Cuenta Bancario", Transaction.Source.BANK, ACCENT_GREEN),
                 "grow");
 
@@ -406,7 +406,7 @@ public class FileUploadPanel extends JPanel {
 
     private void openFileChooser(Transaction.Source source, Color accent) {
         String title = source == Transaction.Source.BOOK
-                ? "Seleccionar Libro Contable"
+                ? "Seleccionar Libro de Banco"
                 : "Seleccionar Estado de Cuenta";
         File file = DialogHelper.chooseOpenFile(this, title, "*.xls;*.xlsx;*.csv;*.pdf;*.txt");
         if (file != null) {
@@ -476,7 +476,7 @@ public class FileUploadPanel extends JPanel {
                     bookStatusLabel.setForeground(ACCENT_BLUE);
                     bookPreviewModel.setTransactions(parsed);
                     showPreview(source);
-                    Toast.show("Libro Contable cargado: " + parsed.size() + " registros", Toast.Type.SUCCESS);
+                    Toast.show("Libro de Banco cargado: " + parsed.size() + " registros", Toast.Type.SUCCESS);
                 } else {
                     bankTransactions = parsed;
                     bankBankName = detectedBank;

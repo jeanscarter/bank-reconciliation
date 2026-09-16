@@ -46,7 +46,7 @@ public class OpcExcelExporter {
 
             int rowNum = 2;
 
-            rowNum = addTransactionTable(sheet, rowNum, "LIBRO CONTABLE", opcBook, headerStyle, textStyle, currencyStyle, subHeaderStyle);
+            rowNum = addTransactionTable(sheet, rowNum, "LIBRO DE BANCO", opcBook, headerStyle, textStyle, currencyStyle, subHeaderStyle);
             rowNum += 2;
             rowNum = addTransactionTable(sheet, rowNum, "ESTADO DE CUENTA BANCARIO", opcBank, headerStyle, textStyle, currencyStyle, subHeaderStyle);
 

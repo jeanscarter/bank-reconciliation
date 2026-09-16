@@ -43,7 +43,7 @@ public class ReconciliationExcelExporter {
 
             // ── Summary Section (Columns A-B for Book, D-E for Bank) ──
             Row headerRow = sheet.createRow(rowNum++);
-            createCell(headerRow, 0, "LIBRO CONTABLE BANCOS", subHeaderStyle);
+            createCell(headerRow, 0, "LIBRO DE BANCO", subHeaderStyle);
             createCell(headerRow, 3, "EXTRACTO BANCARIO", subHeaderStyle);
 
             // Initial Balance
@@ -81,15 +81,15 @@ public class ReconciliationExcelExporter {
             createCell(diffHeader, 0, "ANÁLISIS DE DIFERENCIAS", subHeaderStyle);
             sheet.addMergedRegion(new CellRangeAddress(rowNum - 1, rowNum - 1, 0, 4));
 
-            addDiffRow(sheet, rowNum++, "Diferencia Libro Bancos - Extracto Bancario", data.diferencia,
+            addDiffRow(sheet, rowNum++, "Diferencia Libro de Banco - Extracto Bancario", data.diferencia,
                     boldCurrencyStyle);
             addDiffRow(sheet, rowNum++, "(-) DNA - Depósito no abonado en cuenta bancaria", -data.totalDNA,
                     currencyStyle);
             addDiffRow(sheet, rowNum++, "(+) RNE - Retiro no efectuado en CB o cheque no cobrado", data.totalRNE,
                     currencyStyle);
-            addDiffRow(sheet, rowNum++, "(+) ANR - Abono en CB no registrado en Libro Bancos", data.totalANR,
+            addDiffRow(sheet, rowNum++, "(+) ANR - Abono en CB no registrado en Libro de Banco", data.totalANR,
                     currencyStyle);
-            addDiffRow(sheet, rowNum++, "(-) CNR - Cargo en CB no registrado en Libro Bancos", -data.totalCNR,
+            addDiffRow(sheet, rowNum++, "(-) CNR - Cargo en CB no registrado en Libro de Banco", -data.totalCNR,
                     currencyStyle);
 
             Row saldoRow = sheet.createRow(rowNum++);
@@ -127,13 +127,17 @@ public class ReconciliationExcelExporter {
             sheet.addMergedRegion(new CellRangeAddress(rowNum - 1, rowNum - 1, 2, 3));
 
             // Transactions
+            if (data.largeDifferences != null && !data.largeDifferences.isEmpty()) {
+                rowNum = addLargeDiffGroup(sheet, rowNum, "[!] DISCREPANCIAS EN SALDOS (REFERENCIA COINCIDENTE)",
+                        data.largeDifferences, textStyle, currencyStyle, subHeaderStyle);
+            }
             rowNum = addTransactionGroup(sheet, rowNum, "(-) DNA - Depósito no abonado en cuenta bancaria",
                     data.dnaTransactions, textStyle, currencyStyle, subHeaderStyle);
             rowNum = addTransactionGroup(sheet, rowNum, "(+) RNE - Retiro no efectuado en CB o cheque no cobrado",
                     data.rneTransactions, textStyle, currencyStyle, subHeaderStyle);
-            rowNum = addTransactionGroup(sheet, rowNum, "(+) ANR - Abono en CB no registrado en Libro Bancos",
+            rowNum = addTransactionGroup(sheet, rowNum, "(+) ANR - Abono en CB no registrado en Libro de Banco",
                     data.anrTransactions, textStyle, currencyStyle, subHeaderStyle);
-            rowNum = addTransactionGroup(sheet, rowNum, "(-) CNR - Cargo en CB no registrado en Libro Bancos",
+            rowNum = addTransactionGroup(sheet, rowNum, "(-) CNR - Cargo en CB no registrado en Libro de Banco",
                     data.cnrTransactions, textStyle, currencyStyle, subHeaderStyle);
 
             // Auto-size columns
@@ -148,6 +152,32 @@ public class ReconciliationExcelExporter {
                 workbook.write(fos);
             }
         }
+    }
+
+    private static int addLargeDiffGroup(Sheet sheet, int rowNum, String title,
+            List<com.bankreconciliation.ReconciliationEngine.NearMatch> list,
+            CellStyle textStyle, CellStyle currencyStyle, CellStyle groupHeaderStyle) {
+        if (list == null || list.isEmpty())
+            return rowNum;
+
+        Row header = sheet.createRow(rowNum++);
+        createCell(header, 0, title, groupHeaderStyle);
+        sheet.addMergedRegion(new CellRangeAddress(rowNum - 1, rowNum - 1, 0, 4));
+
+        for (com.bankreconciliation.ReconciliationEngine.NearMatch nm : list) {
+            Transaction bkT = nm.books().get(0);
+            Transaction bnkT = nm.banks().get(0);
+            Row r = sheet.createRow(rowNum++);
+            createCell(r, 0, bkT.getReference() + " / " + bnkT.getReference(), textStyle);
+            createCell(r, 1, bkT.getDate() != null ? bkT.getDate().toString() : "", textStyle);
+            String desc = "Libro: " + String.format(java.util.Locale.US, "%,.2f", bkT.getAbsAmount())
+                    + " vs Banco: " + String.format(java.util.Locale.US, "%,.2f", bnkT.getAbsAmount())
+                    + " (Dif: " + String.format(java.util.Locale.US, "%,.2f", nm.difference()) + ")";
+            createCell(r, 2, desc, textStyle);
+            createCell(r, 4, nm.difference(), currencyStyle);
+            sheet.addMergedRegion(new CellRangeAddress(rowNum - 1, rowNum - 1, 2, 3));
+        }
+        return rowNum + 1; // spacer
     }
 
     private static int addTransactionGroup(Sheet sheet, int rowNum, String title, List<Transaction> list,
