@@ -19,6 +19,16 @@ import java.util.regex.Pattern;
  */
 public class BncProfitLedgerProcessor implements FileParser {
 
+    private String bankName = "BNC";
+
+    public BncProfitLedgerProcessor() {
+        this.bankName = "BNC";
+    }
+
+    public BncProfitLedgerProcessor(File file) {
+        this.bankName = detectBank(file);
+    }
+
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("dd/MM/yyyy");
 
     // Regex for Date header lines: 01/12/2025
@@ -41,6 +51,7 @@ public class BncProfitLedgerProcessor implements FileParser {
 
     @Override
     public List<Transaction> parse(File file, Transaction.Source source) throws Exception {
+        this.bankName = detectBank(file);
         List<Transaction> transactions = new ArrayList<>();
 
         try (PDDocument document = Loader.loadPDF(file)) {
@@ -451,8 +462,44 @@ public class BncProfitLedgerProcessor implements FileParser {
         }
     }
 
+    public static String detectBank(File file) {
+        if (file == null) return "BNC";
+        String filename = file.getName().toUpperCase();
+        if (filename.contains("BANESCO")) return "Banesco";
+        if (filename.contains("BNC") || filename.contains("NACIONAL DE CR")) return "BNC";
+        if (filename.contains("PROVINCIAL") || filename.contains("BBVA")) return "Provincial";
+        if (filename.contains("MERCANTIL")) return "Mercantil";
+        if (filename.contains("VENEZUELA")) return "Venezuela";
+
+        try (PDDocument doc = Loader.loadPDF(file)) {
+            PDFTextStripper stripper = new PDFTextStripper();
+            stripper.setStartPage(1);
+            stripper.setEndPage(1);
+            String text = stripper.getText(doc).toUpperCase();
+
+            if (text.contains("DESDE 0134") || text.contains("HASTA 0134") || text.contains("BANESCO") || text.contains("0134")) {
+                return "Banesco";
+            }
+            if (text.contains("DESDE 0191") || text.contains("HASTA 0191") || text.contains("BANCO NACIONAL DE CR") || text.contains("BNC") || text.contains("0191")) {
+                return "BNC";
+            }
+            if (text.contains("DESDE 0108") || text.contains("HASTA 0108") || text.contains("PROVINCIAL") || text.contains("BBVA") || text.contains("0108")) {
+                return "Provincial";
+            }
+            if (text.contains("DESDE 0105") || text.contains("HASTA 0105") || text.contains("MERCANTIL") || text.contains("0105")) {
+                return "Mercantil";
+            }
+            if (text.contains("DESDE 0102") || text.contains("HASTA 0102") || text.contains("BANCO DE VENEZUELA") || text.contains("0102")) {
+                return "Venezuela";
+            }
+        } catch (Exception ignored) {
+        }
+
+        return "BNC";
+    }
+
     @Override
     public String getBankName() {
-        return "BNC";
+        return bankName;
     }
 }

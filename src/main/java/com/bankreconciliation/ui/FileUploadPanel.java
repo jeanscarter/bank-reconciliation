@@ -140,13 +140,16 @@ public class FileUploadPanel extends JPanel {
     }
 
     private boolean validateUpload() {
-        if (!bookBankName.equals("Desconocido") && !bankBankName.equals("Desconocido") && !bookBankName.equals(bankBankName)) {
-            JOptionPane.showMessageDialog(this, 
-                "Los bancos detectados no coinciden.\n" +
-                "Libro: " + bookBankName + "\n" +
-                "Estado de Cuenta: " + bankBankName, 
-                "Error de Validación de Banco", JOptionPane.ERROR_MESSAGE);
-            return false;
+        if (!bookBankName.equals("Desconocido") && !bankBankName.equals("Desconocido") && !bookBankName.equalsIgnoreCase(bankBankName)) {
+            int result = JOptionPane.showConfirmDialog(this, 
+                "Los bancos detectados parecen no coincidir:\n\n" +
+                "• Libro de Banco: " + bookBankName + "\n" +
+                "• Estado de Cuenta: " + bankBankName + "\n\n" +
+                "¿Desea continuar con la conciliación de todos modos?", 
+                "Advertencia de Banco", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+            if (result != JOptionPane.YES_OPTION) {
+                return false;
+            }
         }
 
         int bookMonth = getMostFrequentMonth(bookTransactions);
@@ -425,8 +428,8 @@ public class FileUploadPanel extends JPanel {
             protected Void doInBackground() {
                 try {
                     FileParser parser = ParserFactory.getParser(file);
-                    detectedBank = parser.getBankName();
                     parsed = parser.parse(file, source);
+                    detectedBank = parser.getBankName();
                     if (source == Transaction.Source.BANK) {
                         extractedSaldo = parser.extractSaldoInicial(file);
                     }

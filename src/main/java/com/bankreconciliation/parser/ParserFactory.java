@@ -28,7 +28,7 @@ public class ParserFactory {
         } else if (name.endsWith(".pdf")) {
             // Auto-detect Profit Ledger (PDF) first because ledgers contain transactions mentioning various banks
             if (BncProfitLedgerProcessor.isProfitLedger(file)) {
-                return new BncProfitLedgerProcessor();
+                return new BncProfitLedgerProcessor(file);
             }
             // Auto-detect BBVA Provincial bank statement PDF
             if (ProvincialBankStatementProcessor.isProvincialBankStatement(file)) {
